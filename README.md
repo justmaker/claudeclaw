@@ -11,16 +11,18 @@ ClaudeClaw turns your Claude Code into a personal assistant that never sleeps. I
 
 ## Why ClaudeClaw?
 
-| Category | OpenClaw | ClaudeClaw |
+| Category | ClaudeClaw | OpenClaw |
 | --- | --- | --- |
-| API Overhead | Extra API overhead | Directly uses your Claude Code subscription |
-| Setup & Installation | Nightmare | ~5 minutes |
-| Deployment | Nightmare | Install Claude Code on any device and run |
-| Feature Scope | 600k+ LOC; you'll likely use a small part | Lightweight features you actually use |
-| UI & Observability | No | Yes, with a manageable dashboard |
-| Legal Risk | High concern | No |
-| Cost Efficiency | Burns tokens fast | Efficient usage |
-| Memory | Nightmare | Uses Claude internal memory system + `CLAUDE.md` |
+| API Overhead | Directly uses your Claude Code subscription | Extra API overhead |
+| Setup & Installation | ~5 minutes | Nightmare |
+| Deployment | Install Claude Code on any device or VPS and run | Nightmare |
+| Isolation Model | Folder-based and isolated as needed | Global by default (security risk) |
+| Feature Scope | Lightweight features you actually use | 600k+ LOC; you'll likely use a small part |
+| UI & Observability | Yes, with a manageable dashboard | No |
+| Security | Average Claude Code usage | Nightmare |
+| Legal Risk | No | High concern |
+| Cost Efficiency | Efficient usage | Burns tokens fast |
+| Memory | Uses Claude internal memory system + `CLAUDE.md` | Nightmare |
 
 ## Getting Started in 5 Minutes
 
