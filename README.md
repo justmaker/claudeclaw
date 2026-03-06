@@ -6,9 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://awesome.re">
-    <img src="https://awesome.re/badge.svg" alt="Awesome" />
-  </a>
+  <img src="https://awesome.re/badge.svg" alt="Awesome" />
   <a href="https://github.com/moazbuilds/ClaudeClaw/stargazers">
     <img src="https://img.shields.io/github/stars/moazbuilds/ClaudeClaw?style=flat-square" alt="GitHub Stars" />
   </a>
