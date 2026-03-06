@@ -20,7 +20,7 @@ ClaudeClaw turns your Claude Code into a personal assistant that never sleeps. I
 | Feature Scope | Lightweight features you actually use | 600k+ LOC nightmare |
 | Security | Average Claude Code usage | Nightmare |
 | Anthropic Will Sue You | No | Yes |
-| Cost Efficiency | Efficient usage | Burns tokens fast |
+| Cost Efficiency | Efficient usage | Nightmare |
 | Memory | Uses Claude internal memory system + `CLAUDE.md` | Nightmare |
 
 ## Getting Started in 5 Minutes
