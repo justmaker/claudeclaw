@@ -59,10 +59,15 @@ The setup wizard walks you through model, heartbeat, Telegram, and security, the
 ### Core Automation
 
 #### Heartbeat
-Periodic check-ins on a configurable interval with quiet hours support. Fully manageable: you can change both the heartbeat schedule and the heartbeat prompt whenever needed.
+Run periodic check-ins on a configurable interval with quiet-hours support.
+- Adjust heartbeat timing at any time.
+- Customize the heartbeat prompt to match your workflow.
 
 #### Cron Jobs
-Run any job on a schedule with timezone awareness, either in repeated patterns or one-time runs. The runtime handles execution flow and keeps the system reliable.
+Schedule any prompt with timezone awareness:
+- Repeating schedules (daily/weekly/custom cron).
+- One-time runs for specific tasks.
+- Reliable execution managed by the runtime.
 
 ### Communication
 
@@ -71,23 +76,25 @@ Run any job on a schedule with timezone awareness, either in repeated patterns o
 - Discord: coming soon.
 
 #### Time Awareness
-Every message can include a time prefix so the agent stays aware of timing, understands delays, and aligns better with your daily patterns and expected tasks.
+Each message can include a time prefix so the agent stays context-aware:
+- Understands delays and timing gaps.
+- Aligns responses with your daily patterns and expected tasks.
 
 ### Reliability
 
 #### GLM Fallback
-If your main subscription/model limit is hit, you can configure fallback to GLM models so your agent keeps running without stopping.
+If your primary model/subscription limit is reached, fallback to GLM models keeps your agent running without interruption.
 
 ### Control and Visibility
 
 #### Web Dashboard
-Monitor runs, edit jobs, and inspect logs in real time from a manageable UI.
+Monitor runs, edit jobs, and inspect logs in real time from a clean, manageable UI.
 
 #### Security Levels
-Use four access levels from read-only to full system access, depending on how much control you want to grant.
+Choose from four access levels, from read-only to full system access, based on the control you want to grant.
 
 #### Model Selection
-Pick the model setup that fits your workload and switch when needed.
+Select the model setup that fits your workload and switch when needed.
 
 ## FAQ
 
