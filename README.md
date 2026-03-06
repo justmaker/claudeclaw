@@ -5,6 +5,18 @@
   <img src="images/claudeclaw-wordmark.png" alt="ClaudeClaw Wordmark" />
 </p>
 
+<p align="center">
+  <a href="https://github.com/topics/claude-code">
+    <img src="https://img.shields.io/badge/Awesome-Claude%20Projects-0A66C2?style=for-the-badge" alt="Awesome Claude Projects" />
+  </a>
+  <a href="https://www.anthropic.com/claude-code">
+    <img src="https://img.shields.io/badge/Built%20for-Claude%20Code-1F8EFA?style=for-the-badge" alt="Built for Claude Code" />
+  </a>
+  <a href="https://bun.sh/">
+    <img src="https://img.shields.io/badge/Runtime-Bun-111111?style=for-the-badge" alt="Runtime Bun" />
+  </a>
+</p>
+
 <p align="center"><b>A lightweight, open-source OpenClaw version built into your Claude Code.</b></p>
 
 ClaudeClaw turns your Claude Code into a personal assistant that never sleeps. It runs as a background daemon, executing tasks on a schedule, responding to messages on Telegram, transcribing voice commands, and integrating with any service you need.
