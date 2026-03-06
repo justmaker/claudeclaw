@@ -17,7 +17,7 @@ ClaudeClaw turns your Claude Code into a personal assistant that never sleeps. I
 | Setup & Installation | ~5 minutes | Nightmare |
 | Deployment | Install Claude Code on any device or VPS and run | Nightmare |
 | Isolation Model | Folder-based and isolated as needed | Global by default (security risk) |
-| Feature Scope | Lightweight features you actually use | 600k+ LOC; you'll likely use a small part |
+| Feature Scope | Lightweight features you actually use | 600k+ LOC nightmare |
 | UI & Observability | Yes, with a manageable dashboard | No |
 | Security | Average Claude Code usage | Nightmare |
 | Legal Risk | No | High concern |
