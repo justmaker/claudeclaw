@@ -54,7 +54,7 @@ Then open a Claude Code session and run:
 ```
 The setup wizard walks you through model, heartbeat, Telegram, and security, then your daemon is live with a web dashboard.
 
-## What Should We Build Next?
+## Mega Post
 
 > **Mega Post:** Help shape the next ClaudeClaw features.
 > Vote, suggest ideas, and discuss priorities in **[this post](https://github.com/moazbuilds/claudeclaw/issues/14)**.
