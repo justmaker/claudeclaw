@@ -71,6 +71,12 @@ Start the heartbeat daemon for this project. Follow these steps exactly:
 
    - **Model**: Set `model` in settings to their choice (e.g. `"opus"`, `"sonnet"`, `"haiku"`, `"glm"`). Default is `"opus"` if they don't pick.
    - **If model is `glm`**: Ask in normal free-form text for API token and set top-level `api` to that value (optional; user can skip). Only ask this token question when the selected model is `glm`.
+
+   - **Agentic mode**: Use AskUserQuestion to ask:
+     - "Enable agentic model routing? This automatically selects models based on task type using configurable modes." (header: "Agentic", options: "Yes — default modes (Recommended)", "No — use single model")
+     - If "Yes": Set `agentic.enabled` to `true` with default modes (planning→opus, implementation→sonnet). The user can customize modes later via `/config`.
+     - If "No": Set `agentic.enabled` to `false`.
+   - Ask whether to set a fallback model. Recommend `glm` first so fallback uses a different provider path than the primary Claude model. If yes, set `fallback.model` and optionally `fallback.api`.
    - Ask whether to enable GLM fallback (kicks in automatically when your Claude token limit is hit). The fallback model is always `glm` — no other model is supported. Use AskUserQuestion: "Enable GLM fallback? Automatically switches to GLM when your Claude limit is hit." (header: "Fallback", options: "Yes — enable GLM fallback", "Skip"). If yes, ask in normal free-form text for the GLM API token (optional, user can skip). Set `fallback.model` to `"glm"` and `fallback.api` to the token if provided.
 
    - **If yes to heartbeat**: Use AskUserQuestion again with one question:
@@ -89,6 +95,8 @@ Start the heartbeat daemon for this project. Follow these steps exactly:
      - Discord bot token (hint: create a bot at https://discord.com/developers/applications → Bot → Token. Enable **Message Content Intent** under Privileged Gateway Intents.)
      - Allowed Discord user IDs (hint: enable Developer Mode in Discord settings → right-click your profile → Copy User ID). These are large numbers — they will be stored as strings.
      - Set `discord.token` and `discord.allowedUserIds` (as array of strings) accordingly.
+     - Listen channel IDs (optional — hint: right-click a channel in Discord with Developer Mode enabled → Copy Channel ID). Channels where the bot responds to all messages without requiring an @mention.
+     - Set `discord.listenChannels` (as array of strings) accordingly.
      - Note: Discord bot connects via WebSocket gateway in-process with the daemon. It supports DMs, guild mentions/replies, slash commands (/start, /reset), voice messages, and image attachments. `discord.allowedUserIds` is an allowlist that applies to messages, slash commands, and button interactions.
 
    - **Security level mapping** — set `security.level` in settings based on their choice:
@@ -168,6 +176,23 @@ Defaults: `WEB_HOST=127.0.0.1`, `WEB_PORT=4632` unless changed via settings or `
     "model": "glm",
     "api": ""
   },
+  "agentic": {
+    "enabled": true,
+    "defaultMode": "implementation",
+    "modes": [
+      {
+        "name": "planning",
+        "model": "opus",
+        "keywords": ["plan", "design", "architect", "research", "analyze", "think", "evaluate", "review"],
+        "phrases": ["how should i", "what's the best way to", "help me decide"]
+      },
+      {
+        "name": "implementation",
+        "model": "sonnet",
+        "keywords": ["implement", "code", "write", "fix", "deploy", "test", "commit"]
+      }
+    ]
+  },
   "timezone": "UTC+0",
   "heartbeat": {
     "enabled": true,
@@ -182,7 +207,8 @@ Defaults: `WEB_HOST=127.0.0.1`, `WEB_PORT=4632` unless changed via settings or `
   },
   "discord": {
     "token": "MTIz...",
-    "allowedUserIds": ["123456789012345678"]
+    "allowedUserIds": ["123456789012345678"],
+    "listenChannels": ["987654321098765432"]
   },
   "security": {
     "level": "moderate",
@@ -191,10 +217,13 @@ Defaults: `WEB_HOST=127.0.0.1`, `WEB_PORT=4632` unless changed via settings or `
   }
 }
 ```
-- `model` — Claude model to use (`opus`, `sonnet`, `haiku`, `glm`, or full model ID). Empty string uses default.
+- `model` — Claude model to use (`opus`, `sonnet`, `haiku`, `glm`, or full model ID). Empty string uses default. Ignored when `agentic.enabled` is true.
 - `api` — API token used when `model` is `glm` (passed as `ANTHROPIC_AUTH_TOKEN` for that provider path).
-- `fallback.model` — always `"glm"`. Automatically used when your Claude token limit is hit. No other fallback model is supported.
-- `fallback.api` — API token for the GLM fallback model.
+- `fallback.model` — backup model used automatically if the primary run returns a rate-limit message. Prefer `glm` for provider diversity.
+- `fallback.api` — optional API token to use with `fallback.model`.
+- `agentic.enabled` — when true, automatically routes tasks to appropriate models based on task type
+- `agentic.defaultMode` — which mode to use when no keywords match (default: `"implementation"`)
+- `agentic.modes` — array of routing modes, each with: `name` (string), `model` (string), `keywords` (string[]), optional `phrases` (string[], checked before keywords with higher priority). Old `planningModel`/`implementationModel` format is auto-converted.
 - `timezone` — canonical app timezone as UTC offset text (example: `UTC+1`, `UTC-5`, `UTC+03:30`). Heartbeat windows, jobs, and UI all use this timezone.
 - `heartbeat.enabled` — whether the recurring heartbeat runs
 - `heartbeat.interval` — minutes between heartbeat runs
@@ -204,6 +233,7 @@ Defaults: `WEB_HOST=127.0.0.1`, `WEB_PORT=4632` unless changed via settings or `
 - `telegram.allowedUserIds` — array of numeric Telegram user IDs allowed to interact
 - `discord.token` — Discord bot token from the Developer Portal
 - `discord.allowedUserIds` — array of string Discord user IDs (snowflakes) allowed to interact
+- `discord.listenChannels` — array of string channel IDs where the bot responds to all messages without requiring an @mention
 - `security.level` — one of: `locked`, `strict`, `moderate`, `unrestricted`
 - `security.allowedTools` — extra tools to allow on top of the level (e.g. `["Bash(git:*)"]`)
 - `security.disallowedTools` — tools to block on top of the level
