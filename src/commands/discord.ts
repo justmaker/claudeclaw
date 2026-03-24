@@ -444,6 +444,65 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
       }
     }
 
+    // --- Thread management: hire/fire commands ---
+    const hireMatch = cleanContent.match(/^(?:hire|建立|開)\s+(.+)/i);
+    const fireMatch = cleanContent.match(/^(?:fire|刪除|關)\s+(.+)/i);
+
+    if (hireMatch && isGuild) {
+      const threadName = hireMatch[1].trim();
+      try {
+        const thread = await discordApi<{ id: string; name: string }>(
+          config.token,
+          "POST",
+          `/channels/${channelId}/threads`,
+          {
+            name: threadName,
+            type: 11, // PUBLIC_THREAD
+            auto_archive_duration: 10080, // 7 days
+          },
+        );
+        knownThreads.set(thread.id, { parentId: channelId });
+        await sendMessage(config.token, thread.id, `🧵 Thread **${threadName}** created with independent session. Start chatting!`);
+        await sendMessage(config.token, channelId, `✅ Hired **${threadName}** → <#${thread.id}>`);
+        debugLog(`Thread created: ${thread.id} (${threadName})`);
+      } catch (err) {
+        await sendMessage(config.token, channelId, `❌ Failed to create thread: ${err instanceof Error ? err.message : err}`);
+      }
+      return;
+    }
+
+    if (fireMatch && isGuild) {
+      const threadName = fireMatch[1].trim().toLowerCase();
+      // Find matching thread in knownThreads
+      let foundId: string | null = null;
+      for (const [tid, info] of knownThreads.entries()) {
+        if (info.parentId === channelId) {
+          // Fetch thread info to check name
+          try {
+            const ch = await discordApi<{ id: string; name: string }>(config.token, "GET", `/channels/${tid}`);
+            if (ch.name.toLowerCase() === threadName) {
+              foundId = tid;
+              break;
+            }
+          } catch { /* thread might be gone */ }
+        }
+      }
+      if (foundId) {
+        try {
+          await removeThreadSession(foundId);
+          await discordApi(config.token, "DELETE", `/channels/${foundId}`);
+          knownThreads.delete(foundId);
+          await sendMessage(config.token, channelId, `🗑️ Fired **${fireMatch[1].trim()}** — thread and session deleted.`);
+          debugLog(`Thread deleted: ${foundId} (${threadName})`);
+        } catch (err) {
+          await sendMessage(config.token, channelId, `❌ Failed to delete thread: ${err instanceof Error ? err.message : err}`);
+        }
+      } else {
+        await sendMessage(config.token, channelId, `❌ Thread **${fireMatch[1].trim()}** not found.`);
+      }
+      return;
+    }
+
     // Skill routing: detect slash commands and resolve to SKILL.md prompts
     const command = cleanContent.startsWith("/") ? cleanContent.trim().split(/\s+/, 1)[0].toLowerCase() : null;
     let skillContext: string | null = null;
