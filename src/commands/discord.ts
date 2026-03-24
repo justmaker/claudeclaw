@@ -1,6 +1,7 @@
 import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession } from "../runner";
 import { getSettings, loadSettings } from "../config";
 import { resetSession, peekSession } from "../sessions";
+import { listThreadSessions, removeThreadSession } from "../sessionManager";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -114,6 +115,9 @@ let applicationId: string | null = null;
 
 // Track guilds we were already in before this session to avoid duplicate welcome messages
 let readyGuildIds: Set<string> | null = null;
+
+// Track known thread channel IDs and their parent channel IDs for multi-session support
+const knownThreads = new Map<string, { parentId: string }>();
 
 // --- Debug ---
 
@@ -246,6 +250,10 @@ function guildTriggerReason(message: DiscordMessage): string | null {
   // Listen channel (respond to all messages, no mention needed)
   const config = getSettings().discord;
   if (config.listenChannels.includes(message.channel_id)) return "listen_channel";
+
+  // Thread whose parent channel is a listen channel
+  const threadInfo = knownThreads.get(message.channel_id);
+  if (threadInfo && config.listenChannels.includes(threadInfo.parentId)) return "listen_channel_thread";
 
   return null;
 }
@@ -476,7 +484,9 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
     }
 
     const prefixedPrompt = promptParts.join("\n");
-    const result = await runUserMessage("discord", prefixedPrompt);
+    // Use thread-specific session if message is in a known thread
+    const threadId = knownThreads.has(channelId) ? channelId : undefined;
+    const result = await runUserMessage("discord", prefixedPrompt, threadId);
 
     if (result.exitCode !== 0) {
       await sendMessage(config.token, channelId, `Error (exit ${result.exitCode}): ${result.stderr || result.stdout || "Unknown error"}`);
@@ -547,6 +557,7 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
         await respondToInteraction(interaction, { content: "📊 No active session." });
         return;
       }
+      const threadSessions = await listThreadSessions();
       const lines = [
         "📊 **Session Status**",
         `Session: \`${session.sessionId.slice(0, 8)}\``,
@@ -557,6 +568,15 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
         `Last used: ${session.lastUsedAt}`,
         `Compact warned: ${(session as any).compactWarned ? "yes" : "no"}`,
       ];
+      if (threadSessions.length > 0) {
+        lines.push("", `**Thread Sessions:** ${threadSessions.length}`);
+        for (const ts of threadSessions.slice(0, 5)) {
+          lines.push(`  Thread \`${ts.threadId.slice(0, 8)}\` → Session \`${ts.sessionId.slice(0, 8)}\` (${ts.turnCount} turns)`);
+        }
+        if (threadSessions.length > 5) {
+          lines.push(`  ... and ${threadSessions.length - 5} more`);
+        }
+      }
       await respondToInteraction(interaction, { content: lines.join("\n") });
       return;
     }
@@ -742,6 +762,7 @@ function resetGatewayState(): void {
   botUserId = null;
   botUsername = null;
   applicationId = null;
+  knownThreads.clear();
 }
 
 function sendIdentify(token: string): void {
@@ -808,9 +829,54 @@ function handleDispatch(token: string, eventName: string, data: any): void {
       break;
 
     case "GUILD_CREATE":
+      // Cache active threads for multi-session support
+      if (data.threads) {
+        for (const thread of data.threads) {
+          knownThreads.set(thread.id, { parentId: thread.parent_id });
+        }
+      }
       handleGuildCreate(token, data).catch((err) =>
         console.error(`[Discord] GUILD_CREATE unhandled: ${err}`),
       );
+      break;
+
+    case "THREAD_CREATE":
+      if (data.id && data.parent_id) {
+        knownThreads.set(data.id, { parentId: data.parent_id });
+        debugLog(`Thread tracked: ${data.id} (parent: ${data.parent_id})`);
+      }
+      break;
+
+    case "THREAD_DELETE":
+      if (data.id) {
+        knownThreads.delete(data.id);
+        removeThreadSession(data.id).catch((err) =>
+          console.error(`[Discord] Failed to cleanup thread session: ${err}`),
+        );
+        debugLog(`Thread removed: ${data.id}`);
+      }
+      break;
+
+    case "THREAD_UPDATE":
+      if (data.id && data.parent_id) {
+        if (data.thread_metadata?.archived) {
+          knownThreads.delete(data.id);
+          removeThreadSession(data.id).catch((err) =>
+            console.error(`[Discord] Failed to cleanup archived thread session: ${err}`),
+          );
+          debugLog(`Thread archived and cleaned up: ${data.id}`);
+        } else {
+          knownThreads.set(data.id, { parentId: data.parent_id });
+        }
+      }
+      break;
+
+    case "THREAD_LIST_SYNC":
+      if (data.threads) {
+        for (const thread of data.threads) {
+          knownThreads.set(thread.id, { parentId: thread.parent_id });
+        }
+      }
       break;
   }
 }
