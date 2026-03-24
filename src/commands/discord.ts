@@ -445,29 +445,34 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
     }
 
     // --- Thread management: hire/fire commands ---
-    const hireMatch = cleanContent.match(/^(?:hire|建立|開)\s+(.+)/i);
-    const fireMatch = cleanContent.match(/^(?:fire|刪除|關)\s+(.+)/i);
+    const hireMatch = cleanContent.match(/^(?:hire|建立|開|派出)\s+(.+?)(?:\s*出戰)?$/i);
+    const fireMatch = cleanContent.match(/^(?:fire|刪除|關|撤回|收回)\s+(.+?)(?:\s*回來)?$/i);
 
     if (hireMatch && isGuild) {
-      const threadName = hireMatch[1].trim();
-      try {
-        const thread = await discordApi<{ id: string; name: string }>(
-          config.token,
-          "POST",
-          `/channels/${channelId}/threads`,
-          {
-            name: threadName,
-            type: 11, // PUBLIC_THREAD
-            auto_archive_duration: 10080, // 7 days
-          },
-        );
-        knownThreads.set(thread.id, { parentId: channelId });
-        await sendMessage(config.token, thread.id, `🧵 Thread **${threadName}** created with independent session. Start chatting!`);
-        await sendMessage(config.token, channelId, `✅ Hired **${threadName}** → <#${thread.id}>`);
-        debugLog(`Thread created: ${thread.id} (${threadName})`);
-      } catch (err) {
-        await sendMessage(config.token, channelId, `❌ Failed to create thread: ${err instanceof Error ? err.message : err}`);
+      // Support multiple names separated by spaces, commas, or 、
+      const names = hireMatch[1].trim().split(/[\s,、]+/).filter(Boolean);
+      const results: string[] = [];
+      for (const threadName of names) {
+        try {
+          const thread = await discordApi<{ id: string; name: string }>(
+            config.token,
+            "POST",
+            `/channels/${channelId}/threads`,
+            {
+              name: threadName,
+              type: 11, // PUBLIC_THREAD
+              auto_archive_duration: 4320, // 3 days
+            },
+          );
+          knownThreads.set(thread.id, { parentId: channelId });
+          await sendMessage(config.token, thread.id, `🧵 Thread **${threadName}** created with independent session. Start chatting!`);
+          results.push(`✅ **${threadName}** → <#${thread.id}>`);
+          debugLog(`Thread created: ${thread.id} (${threadName})`);
+        } catch (err) {
+          results.push(`❌ **${threadName}** — ${err instanceof Error ? err.message : err}`);
+        }
       }
+      await sendMessage(config.token, channelId, results.join("\n"));
       return;
     }
 
