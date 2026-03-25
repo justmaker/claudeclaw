@@ -267,16 +267,6 @@ interface ThreadIntent {
 }
 
 async function classifyThreadIntent(text: string): Promise<ThreadIntent | null> {
-  const credPath = `${homedir()}/.claude/.credentials.json`;
-  let accessToken: string;
-  try {
-    const creds = JSON.parse(await readFile(credPath, "utf-8"));
-    accessToken = creds?.claudeAiOauth?.accessToken;
-    if (!accessToken) return null;
-  } catch {
-    return null;
-  }
-
   const systemPrompt = `You classify user messages into thread management intents.
 
 If the user wants to CREATE/SPAWN/DEPLOY threads (e.g. "hire X", "派出 X", "叫 X 出來", "派 X 去打", "開 X", "建立 X"):
@@ -293,53 +283,25 @@ Rules:
 - Return ONLY valid JSON or the word null. No explanation.`;
 
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": accessToken,
-        "anthropic-version": "2023-06-01",
+    const { execSync } = await import("node:child_process");
+    const input = `${systemPrompt}\n\n---\nUser message: ${text}`;
+    const result = execSync(
+      `claude --model claude-sonnet-4-20250514 --print --output-format text`,
+      {
+        input,
+        encoding: "utf-8",
+        timeout: 15000,
+        env: { ...process.env, HOME: homedir() },
       },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 256,
-        system: systemPrompt,
-        messages: [{ role: "user", content: text }],
-      }),
-    });
+    ).trim();
 
-    if (!res.ok) {
-      // Try with Authorization header instead (OAuth token)
-      const res2 = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${accessToken}`,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 256,
-          system: systemPrompt,
-          messages: [{ role: "user", content: text }],
-        }),
-      });
-      if (!res2.ok) {
-        console.error(`[Discord] Intent classifier failed: ${res2.status} ${await res2.text()}`);
-        return null;
-      }
-      const data2 = await res2.json() as { content: Array<{ text: string }> };
-      const raw2 = data2.content?.[0]?.text?.trim();
-      if (!raw2 || raw2 === "null") return null;
-      return JSON.parse(raw2) as ThreadIntent;
-    }
-
-    const data = await res.json() as { content: Array<{ text: string }> };
-    const raw = data.content?.[0]?.text?.trim();
-    if (!raw || raw === "null") return null;
-    return JSON.parse(raw) as ThreadIntent;
+    if (!result || result === "null") return null;
+    // Extract JSON from response (in case there's extra text)
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    return JSON.parse(jsonMatch[0]) as ThreadIntent;
   } catch (err) {
-    console.error(`[Discord] Intent classifier error: ${err}`);
+    console.error(`[Discord] Intent classifier error: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
