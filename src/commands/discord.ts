@@ -381,7 +381,13 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
     }
   }
 
-    debugLog(
+  // Guild trigger check
+  const triggerReason = isGuild ? guildTriggerReason(message) : "direct_message";
+  if (isGuild && !triggerReason) {
+    debugLog(`Skip guild message channel=${channelId} from=${userId} reason=no_trigger`);
+    return;
+  }
+  debugLog(
     `Handle message channel=${channelId} from=${userId} reason=${triggerReason} text="${content.slice(0, 80)}"`,
   );
 
