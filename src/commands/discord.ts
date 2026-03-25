@@ -106,7 +106,7 @@ let gatewaySessionId: string | null = null;
 let resumeGatewayUrl: string | null = null;
 let heartbeatAcked = true;
 let running = true;
-let discordDebug = true;
+let discordDebug = false;
 
 // Bot identity (populated from READY)
 let botUserId: string | null = null;
