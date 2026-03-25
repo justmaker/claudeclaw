@@ -962,9 +962,13 @@ function handleDispatch(token: string, eventName: string, data: any): void {
     case "GUILD_CREATE":
       // Cache active threads for multi-session support
       if (data.threads) {
+        console.log(`[Discord] GUILD_CREATE: ${data.threads.length} active threads in guild ${data.id}`);
         for (const thread of data.threads) {
           knownThreads.set(thread.id, { parentId: thread.parent_id });
+          console.log(`[Discord]   thread: ${thread.id} name="${thread.name}" parent=${thread.parent_id}`);
         }
+      } else {
+        console.log(`[Discord] GUILD_CREATE: no active threads in guild ${data.id}`);
       }
       // Rejoin all known threads from sessions.json so gateway sends MESSAGE_CREATE
       (async () => {
@@ -980,9 +984,9 @@ function handleDispatch(token: string, eventName: string, data: any): void {
                   knownThreads.set(ts.threadId, { parentId: ch.parent_id });
                 }
               }
-              debugLog(`Rejoined thread: ${ts.threadId}`);
+              console.log(`[Discord] Rejoined thread: ${ts.threadId}`);
             } catch (err) {
-              debugLog(`Failed to rejoin thread ${ts.threadId}: ${err}`);
+              console.error(`[Discord] Failed to rejoin thread ${ts.threadId}: ${err}`);
             }
           }
           if (threadSessions.length > 0) {
