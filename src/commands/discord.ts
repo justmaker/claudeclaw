@@ -100,6 +100,7 @@ interface GatewayPayload {
 let ws: WebSocket | null = null;
 let heartbeatIntervalMs = 0;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let threadRejoinTimer: ReturnType<typeof setInterval> | null = null;
 let heartbeatJitterTimer: ReturnType<typeof setTimeout> | null = null;
 let lastSequence: number | null = null;
 let gatewaySessionId: string | null = null;
@@ -240,13 +241,27 @@ async function rejoinThreads(token: string): Promise<void> {
   const threadSessions = await listThreadSessions();
   for (const ts of threadSessions) {
     try {
-      await discordApi(token, "PUT", `/channels/${ts.threadId}/thread-members/@me`);
-      if (!knownThreads.has(ts.threadId)) {
-        const ch = await discordApi<{ parent_id?: string }>(token, "GET", `/channels/${ts.threadId}`);
-        if (ch.parent_id) {
+      // First ensure thread is not archived (unarchive if needed)
+      try {
+        const ch = await discordApi<{ thread_metadata?: { archived: boolean }; parent_id?: string }>(
+          token, "GET", `/channels/${ts.threadId}`
+        );
+        if (ch.thread_metadata?.archived) {
+          await discordApi(token, "PATCH", `/channels/${ts.threadId}`, {
+            archived: false,
+          });
+          console.log(`[Discord] Unarchived thread: ${ts.threadId}`);
+        }
+        if (ch.parent_id && !knownThreads.has(ts.threadId)) {
           knownThreads.set(ts.threadId, { parentId: ch.parent_id });
         }
+      } catch (err) {
+        console.error(`[Discord] Failed to check/unarchive thread ${ts.threadId}: ${err}`);
       }
+      // Join as thread member
+      await discordApi(token, "PUT", `/channels/${ts.threadId}/thread-members/@me`);
+      // Send typing indicator to force gateway subscription
+      await sendTyping(token, ts.threadId);
       console.log(`[Discord] Rejoined thread: ${ts.threadId}`);
     } catch (err) {
       console.error(`[Discord] Failed to rejoin thread ${ts.threadId}: ${err}`);
@@ -962,6 +977,13 @@ function handleDispatch(token: string, eventName: string, data: any): void {
       registerSlashCommands(token).catch((err) =>
         console.error(`[Discord] Failed to register slash commands: ${err}`),
       );
+      // Periodic thread rejoin every 5 minutes to maintain gateway subscription
+      if (threadRejoinTimer) clearInterval(threadRejoinTimer);
+      threadRejoinTimer = setInterval(() => {
+        rejoinThreads(token).catch((err) =>
+          console.error(`[Discord] Periodic rejoin failed: ${err}`),
+        );
+      }, 5 * 60 * 1000);
       break;
 
     case "RESUMED":
