@@ -1,7 +1,7 @@
 import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession } from "../runner";
 import { getSettings, loadSettings } from "../config";
 import { resetSession, peekSession } from "../sessions";
-import { listThreadSessions, removeThreadSession } from "../sessionManager";
+import { listThreadSessions, removeThreadSession, peekThreadSession } from "../sessionManager";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -365,13 +365,23 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
   const isGuild = !!message.guild_id;
   const content = message.content;
 
-  // Guild trigger check
-  const triggerReason = isGuild ? guildTriggerReason(message) : "direct_message";
-  if (isGuild && !triggerReason) {
-    debugLog(`Skip guild message channel=${channelId} from=${userId} reason=no_trigger`);
-    return;
+  // Recover lost thread from sessions.json (fallback for knownThreads volatility)
+  if (isGuild && !knownThreads.has(channelId)) {
+    const persisted = await peekThreadSession(channelId);
+    if (persisted) {
+      try {
+        const ch = await discordApi<{ parent_id?: string }>(config.token, "GET", `/channels/${channelId}`);
+        if (ch.parent_id) {
+          knownThreads.set(channelId, { parentId: ch.parent_id });
+          debugLog(`Thread recovered from sessions.json: ${channelId} (parent: ${ch.parent_id})`);
+        }
+      } catch (err) {
+        debugLog(`Thread recovery failed for ${channelId}: ${err}`);
+      }
+    }
   }
-  debugLog(
+
+    debugLog(
     `Handle message channel=${channelId} from=${userId} reason=${triggerReason} text="${content.slice(0, 80)}"`,
   );
 
