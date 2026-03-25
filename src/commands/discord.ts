@@ -947,8 +947,9 @@ function handleDispatch(token: string, eventName: string, data: any): void {
       break;
 
     case "MESSAGE_CREATE":
+      console.log(`[Discord][GW] MESSAGE_CREATE ch=${data.channel_id} author=${data.author?.username} guild=${data.guild_id || 'DM'}`);
       handleMessageCreate(token, data).catch((err) =>
-        console.error(`[Discord] MESSAGE_CREATE unhandled: ${err}`),
+        console.error(`[Discord] MESSAGE_CREATE unhandled:`, err),
       );
       break;
 

@@ -41,6 +41,7 @@ export async function getThreadSession(
   const data = await loadSessions();
   const session = data.threads[threadId];
   if (!session) return null;
+  if (!session.sessionId) return null; // No session ID yet — treat as new
 
   if (typeof session.turnCount !== "number") session.turnCount = 0;
   if (typeof session.compactWarned !== "boolean") session.compactWarned = false;
