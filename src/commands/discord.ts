@@ -1,7 +1,7 @@
 import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession } from "../runner";
 import { getSettings, loadSettings } from "../config";
 import { resetSession, peekSession } from "../sessions";
-import { listThreadSessions, removeThreadSession, peekThreadSession, createThreadSession } from "../sessionManager";
+import { listThreadSessions, removeThreadSession, peekThreadSession } from "../sessionManager";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -527,7 +527,8 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
               },
             );
             knownThreads.set(thread.id, { parentId: channelId });
-            await createThreadSession(thread.id, `thread-${thread.id}`);
+            // Don't pre-create session — let Claude CLI create it on first message
+            // The real UUID will be captured and saved by runner.ts
             await sendMessage(config.token, thread.id, `🧵 Thread **${threadName}** created with independent session. Start chatting!`);
             results.push(`✅ **${threadName}** → <#${thread.id}>`);
             console.log(`[Discord] Thread created: ${thread.id} name="${threadName}" parent=${channelId} knownSize=${knownThreads.size}`);
