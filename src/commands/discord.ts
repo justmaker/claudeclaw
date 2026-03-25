@@ -1,7 +1,7 @@
 import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession } from "../runner";
 import { getSettings, loadSettings } from "../config";
 import { resetSession, peekSession } from "../sessions";
-import { listThreadSessions, removeThreadSession, peekThreadSession } from "../sessionManager";
+import { listThreadSessions, removeThreadSession, peekThreadSession, createThreadSession } from "../sessionManager";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -260,6 +260,92 @@ function guildTriggerReason(message: DiscordMessage): string | null {
 
 // --- Attachment handling ---
 
+// --- AI-powered thread intent classifier (uses Sonnet via Claude OAuth) ---
+interface ThreadIntent {
+  action: "hire" | "fire";
+  names: string[];
+}
+
+async function classifyThreadIntent(text: string): Promise<ThreadIntent | null> {
+  const credPath = `${homedir()}/.claude/.credentials.json`;
+  let accessToken: string;
+  try {
+    const creds = JSON.parse(await readFile(credPath, "utf-8"));
+    accessToken = creds?.claudeAiOauth?.accessToken;
+    if (!accessToken) return null;
+  } catch {
+    return null;
+  }
+
+  const systemPrompt = `You classify user messages into thread management intents.
+
+If the user wants to CREATE/SPAWN/DEPLOY threads (e.g. "hire X", "派出 X", "叫 X 出來", "派 X 去打", "開 X", "建立 X"):
+Return: {"action":"hire","names":["name1","name2"]}
+
+If the user wants to DELETE/REMOVE threads (e.g. "fire X", "撤回 X", "把 X 叫回來", "刪 X", "關 X"):
+Return: {"action":"fire","names":["name1","name2"]}
+
+If the message is NOT about thread management, return: null
+
+Rules:
+- Extract individual names. "桃園三結義" = ["劉備","關羽","張飛"]. "五虎將" = ["關羽","張飛","趙雲","馬超","黃忠"].
+- Common patterns: 派/派出/出征/上陣/迎戰/出戰 = hire. 撤/撤回/收回/叫回來/滾 = fire.
+- Return ONLY valid JSON or the word null. No explanation.`;
+
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": accessToken,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 256,
+        system: systemPrompt,
+        messages: [{ role: "user", content: text }],
+      }),
+    });
+
+    if (!res.ok) {
+      // Try with Authorization header instead (OAuth token)
+      const res2 = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${accessToken}`,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 256,
+          system: systemPrompt,
+          messages: [{ role: "user", content: text }],
+        }),
+      });
+      if (!res2.ok) {
+        console.error(`[Discord] Intent classifier failed: ${res2.status} ${await res2.text()}`);
+        return null;
+      }
+      const data2 = await res2.json() as { content: Array<{ text: string }> };
+      const raw2 = data2.content?.[0]?.text?.trim();
+      if (!raw2 || raw2 === "null") return null;
+      return JSON.parse(raw2) as ThreadIntent;
+    }
+
+    const data = await res.json() as { content: Array<{ text: string }> };
+    const raw = data.content?.[0]?.text?.trim();
+    if (!raw || raw === "null") return null;
+    return JSON.parse(raw) as ThreadIntent;
+  } catch (err) {
+    console.error(`[Discord] Intent classifier error: ${err}`);
+    return null;
+  }
+}
+
+// --- Attachment handling (original) ---
+
 function isImageAttachment(a: DiscordAttachment): boolean {
   return Boolean(a.content_type?.startsWith("image/"));
 }
@@ -384,7 +470,8 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
   // Guild trigger check
   const triggerReason = isGuild ? guildTriggerReason(message) : "direct_message";
   if (isGuild && !triggerReason) {
-    debugLog(`Skip guild message channel=${channelId} from=${userId} reason=no_trigger`);
+    const threadInfo = knownThreads.get(channelId);
+    console.log(`[Discord][DIAG] SKIP channel=${channelId} guild=${message.guild_id} inKnown=${knownThreads.has(channelId)} threadInfo=${JSON.stringify(threadInfo)} knownSize=${knownThreads.size} listenCh=${JSON.stringify(config.listenChannels)} text="${content.slice(0, 40)}"`);
     return;
   }
   debugLog(
@@ -460,68 +547,68 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
       }
     }
 
-    // --- Thread management: hire/fire commands ---
-    const hireMatch = cleanContent.match(/^(?:hire|建立|開|派出)\s+(.+?)(?:\s*出戰)?$/i);
-    const fireMatch = cleanContent.match(/^(?:fire|刪除|關|撤回|收回)\s+(.+?)(?:\s*回來)?$/i);
-
-    if (hireMatch && isGuild) {
-      // Support multiple names separated by spaces, commas, or 、
-      const names = hireMatch[1].trim().split(/[\s,、]+/).filter(Boolean);
-      const results: string[] = [];
-      for (const threadName of names) {
-        try {
-          const thread = await discordApi<{ id: string; name: string }>(
-            config.token,
-            "POST",
-            `/channels/${channelId}/threads`,
-            {
-              name: threadName,
-              type: 11, // PUBLIC_THREAD
-              auto_archive_duration: 4320, // 3 days
-            },
-          );
-          knownThreads.set(thread.id, { parentId: channelId });
-          await sendMessage(config.token, thread.id, `🧵 Thread **${threadName}** created with independent session. Start chatting!`);
-          results.push(`✅ **${threadName}** → <#${thread.id}>`);
-          debugLog(`Thread created: ${thread.id} (${threadName})`);
-        } catch (err) {
-          results.push(`❌ **${threadName}** — ${err instanceof Error ? err.message : err}`);
-        }
-      }
-      await sendMessage(config.token, channelId, results.join("\n"));
-      return;
-    }
-
-    if (fireMatch && isGuild) {
-      const threadName = fireMatch[1].trim().toLowerCase();
-      // Find matching thread in knownThreads
-      let foundId: string | null = null;
-      for (const [tid, info] of knownThreads.entries()) {
-        if (info.parentId === channelId) {
-          // Fetch thread info to check name
+    // --- Thread management: AI-powered intent classification ---
+    if (isGuild && cleanContent.length < 200) {
+      const intent = await classifyThreadIntent(cleanContent);
+      if (intent && intent.action === "hire" && intent.names.length > 0) {
+        const results: string[] = [];
+        for (const threadName of intent.names) {
           try {
-            const ch = await discordApi<{ id: string; name: string }>(config.token, "GET", `/channels/${tid}`);
-            if (ch.name.toLowerCase() === threadName) {
-              foundId = tid;
-              break;
+            const thread = await discordApi<{ id: string; name: string }>(
+              config.token,
+              "POST",
+              `/channels/${channelId}/threads`,
+              {
+                name: threadName,
+                type: 11, // PUBLIC_THREAD
+                auto_archive_duration: 4320, // 3 days
+              },
+            );
+            knownThreads.set(thread.id, { parentId: channelId });
+            await createThreadSession(thread.id, `thread-${thread.id}`);
+            await sendMessage(config.token, thread.id, `🧵 Thread **${threadName}** created with independent session. Start chatting!`);
+            results.push(`✅ **${threadName}** → <#${thread.id}>`);
+            console.log(`[Discord] Thread created: ${thread.id} name="${threadName}" parent=${channelId} knownSize=${knownThreads.size}`);
+          } catch (err) {
+            results.push(`❌ **${threadName}** — ${err instanceof Error ? err.message : err}`);
+          }
+        }
+        await sendMessage(config.token, channelId, results.join("\n"));
+        return;
+      }
+
+      if (intent && intent.action === "fire" && intent.names.length > 0) {
+        const results: string[] = [];
+        for (const targetName of intent.names) {
+          const targetLower = targetName.toLowerCase();
+          let foundId: string | null = null;
+          for (const [tid, info] of knownThreads.entries()) {
+            if (info.parentId === channelId) {
+              try {
+                const ch = await discordApi<{ id: string; name: string }>(config.token, "GET", `/channels/${tid}`);
+                if (ch.name.toLowerCase() === targetLower) {
+                  foundId = tid;
+                  break;
+                }
+              } catch { /* thread might be gone */ }
             }
-          } catch { /* thread might be gone */ }
+          }
+          if (foundId) {
+            try {
+              await removeThreadSession(foundId);
+              await discordApi(config.token, "DELETE", `/channels/${foundId}`);
+              knownThreads.delete(foundId);
+              results.push(`🗑️ **${targetName}** — deleted`);
+            } catch (err) {
+              results.push(`❌ **${targetName}** — ${err instanceof Error ? err.message : err}`);
+            }
+          } else {
+            results.push(`❌ **${targetName}** — not found`);
+          }
         }
+        await sendMessage(config.token, channelId, results.join("\n"));
+        return;
       }
-      if (foundId) {
-        try {
-          await removeThreadSession(foundId);
-          await discordApi(config.token, "DELETE", `/channels/${foundId}`);
-          knownThreads.delete(foundId);
-          await sendMessage(config.token, channelId, `🗑️ Fired **${fireMatch[1].trim()}** — thread and session deleted.`);
-          debugLog(`Thread deleted: ${foundId} (${threadName})`);
-        } catch (err) {
-          await sendMessage(config.token, channelId, `❌ Failed to delete thread: ${err instanceof Error ? err.message : err}`);
-        }
-      } else {
-        await sendMessage(config.token, channelId, `❌ Thread **${fireMatch[1].trim()}** not found.`);
-      }
-      return;
     }
 
     // Skill routing: detect slash commands and resolve to SKILL.md prompts
