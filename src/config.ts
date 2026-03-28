@@ -61,6 +61,7 @@ const DEFAULT_SETTINGS: Settings = {
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "" },
+  workspace: { path: "" },
 };
 
 export interface HeartbeatExcludeWindow {
@@ -113,6 +114,7 @@ export interface Settings {
   security: SecurityConfig;
   web: WebConfig;
   stt: SttConfig;
+  workspace: WorkspaceConfig;
 }
 
 export interface AgenticMode {
@@ -137,6 +139,15 @@ export interface WebConfig {
   enabled: boolean;
   host: string;
   port: number;
+}
+
+export interface WorkspaceConfig {
+  /** Path to a workspace directory containing shared prompt files and skills.
+   *  Follows the same convention as OpenClaw workspaces:
+   *  - AGENTS.md, SOUL.md, TOOLS.md, KNOWLEDGE.md at the root
+   *  - skills/ directory with SKILL.md files
+   *  When empty, workspace loading is disabled. */
+  path: string;
 }
 
 export interface SttConfig {
@@ -274,6 +285,9 @@ function parseSettings(raw: Record<string, any>): Settings {
       baseUrl: typeof raw.stt?.baseUrl === "string" ? raw.stt.baseUrl.trim() : "",
       model: typeof raw.stt?.model === "string" ? raw.stt.model.trim() : "",
     },
+    workspace: {
+      path: typeof raw.workspace?.path === "string" ? raw.workspace.path.trim() : "",
+    },
   };
 }
 
@@ -374,4 +388,219 @@ export async function resolvePrompt(prompt: string): Promise<string> {
     console.warn(`[config] Prompt path "${trimmed}" not found, using as literal string`);
     return trimmed;
   }
+}
+
+/**
+ * Load shared prompt files from a claw-config repository.
+ * Always loads: AGENTS.md, SOUL.md
+ * Optionally loads: TOOLS.md, KNOWLEDGE.md (if they exist)
+ * Returns concatenated content, or empty string if workspace is not configured.
+ */
+export async function loadClawConfigPrompts(): Promise<string> {
+  const settings = getSettings();
+  const { path: configPath } = settings.workspace;
+  if (!configPath) return "";
+
+  const sharedDir = join(configPath, "shared");
+  // Layer 1 (always load) + Layer 3 (load if exists)
+  const files = ["AGENTS.md", "SOUL.md", "TOOLS.md", "KNOWLEDGE.md"];
+  const parts: string[] = [];
+
+  for (const file of files) {
+    const filePath = join(sharedDir, file);
+    try {
+      const content = await Bun.file(filePath).text();
+      if (content.trim()) {
+        parts.push(`<!-- claw-config: ${file} -->\n${content.trim()}`);
+      }
+    } catch {
+      // File doesn't exist — skip silently for optional files (TOOLS, KNOWLEDGE)
+      if (file === "AGENTS.md" || file === "SOUL.md") {
+        console.warn(`[claw-config] Required file not found: ${filePath}`);
+      }
+    }
+  }
+
+  return parts.join("\n\n");
+}
+
+/**
+ * List available skills from claw-config's skills/ directory.
+ * Returns an XML block similar to OpenClaw's <available_skills> format,
+ * suitable for appending to the system prompt so Claude can self-select.
+ */
+export async function loadClawConfigSkills(): Promise<string> {
+  const settings = getSettings();
+  const { path: configPath } = settings.workspace;
+  if (!configPath) return "";
+
+  const skillsDir = join(configPath, "skills");
+  const indexPath = join(skillsDir, "INDEX.md");
+
+  // Parse INDEX.md for skill metadata
+  try {
+    const indexContent = await Bun.file(indexPath).text();
+    if (!indexContent.trim()) return "";
+
+    const skills: { name: string; trigger: string; file: string; description: string }[] = [];
+
+    // Parse table rows: | name | trigger | file | description |
+    for (const line of indexContent.split("\n")) {
+      const match = line.match(/^\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|$/);
+      if (!match) continue;
+      const [, name, trigger, file, description] = match;
+      if (name.startsWith("---") || name.toLowerCase() === "name") continue;
+      skills.push({
+        name: name.trim(),
+        trigger: trigger.trim(),
+        file: file.trim(),
+        description: description.trim(),
+      });
+    }
+
+    if (skills.length === 0) return "";
+
+    // Build OpenClaw-style <available_skills> XML
+    const lines = ["<available_skills>"];
+    for (const skill of skills) {
+      const skillFilePath = join(skillsDir, skill.file);
+      lines.push("  <skill>");
+      lines.push(`    <name>${skill.name}</name>`);
+      lines.push(`    <description>${skill.description}</description>`);
+      lines.push(`    <location>${skillFilePath}</location>`);
+      lines.push("  </skill>");
+    }
+    lines.push("</available_skills>");
+
+    return [
+      "## Available Skills (from claw-config)",
+      "Before replying: scan <available_skills> descriptions.",
+      "- If a skill clearly applies: read its file, then follow it.",
+      "- If none apply: proceed without reading any skill file.",
+      "",
+      lines.join("\n"),
+    ].join("\n");
+  } catch {
+    // INDEX.md doesn't exist or not readable
+    return "";
+  }
+}
+
+/**
+ * Load workspace prompt files following the OpenClaw workspace convention.
+ * Always loads: AGENTS.md, SOUL.md
+ * Optionally loads: TOOLS.md, KNOWLEDGE.md, IDENTITY.md, USER.md (if they exist)
+ * Returns concatenated content, or empty string if workspace is not configured.
+ */
+export async function loadWorkspacePrompts(): Promise<string> {
+  const settings = getSettings();
+  const { path: wsPath } = settings.workspace;
+  if (!wsPath) return "";
+
+  // OpenClaw convention: files live at the workspace root
+  const files = ["AGENTS.md", "SOUL.md", "TOOLS.md", "KNOWLEDGE.md", "IDENTITY.md", "USER.md"];
+  const parts: string[] = [];
+
+  for (const file of files) {
+    const filePath = join(wsPath, file);
+    try {
+      const content = await Bun.file(filePath).text();
+      if (content.trim()) {
+        parts.push(`<!-- workspace: ${file} -->\n${content.trim()}`);
+      }
+    } catch {
+      // File doesn't exist — skip silently
+    }
+  }
+
+  if (parts.length > 0) {
+    console.log(`[workspace] Loaded ${parts.length} prompt file(s) from ${wsPath}`);
+  }
+
+  return parts.join("\n\n");
+}
+
+/**
+ * Scan workspace skills/ directory following the OpenClaw convention.
+ * Looks for skills/{name}/SKILL.md (directory-based) and skills/*.md (single-file).
+ * Returns an XML block in OpenClaw's <available_skills> format.
+ */
+export async function loadWorkspaceSkills(): Promise<string> {
+  const settings = getSettings();
+  const { path: wsPath } = settings.workspace;
+  if (!wsPath) return "";
+
+  const skillsDir = join(wsPath, "skills");
+  const skills: { name: string; description: string; location: string }[] = [];
+
+  try {
+    const { readdir: rd } = await import("node:fs/promises");
+    const entries = await rd(skillsDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        // OpenClaw convention: skills/{name}/SKILL.md
+        const skillPath = join(skillsDir, entry.name, "SKILL.md");
+        try {
+          const content = await Bun.file(skillPath).text();
+          if (content.trim()) {
+            skills.push({
+              name: entry.name,
+              description: extractSkillDescription(content),
+              location: skillPath,
+            });
+          }
+        } catch { /* skip */ }
+      } else if (entry.isFile() && entry.name.endsWith(".md") && entry.name !== "INDEX.md") {
+        // Single-file skill: skills/xxx.md
+        const skillPath = join(skillsDir, entry.name);
+        try {
+          const content = await Bun.file(skillPath).text();
+          if (content.trim()) {
+            skills.push({
+              name: entry.name.replace(/\.md$/, ""),
+              description: extractSkillDescription(content),
+              location: skillPath,
+            });
+          }
+        } catch { /* skip */ }
+      }
+    }
+  } catch {
+    // skills/ directory doesn't exist
+    return "";
+  }
+
+  if (skills.length === 0) return "";
+
+  console.log(`[workspace] Found ${skills.length} skill(s) in ${skillsDir}`);
+
+  const lines = ["<available_skills>"];
+  for (const skill of skills) {
+    lines.push("  <skill>");
+    lines.push(`    <name>${skill.name}</name>`);
+    lines.push(`    <description>${skill.description}</description>`);
+    lines.push(`    <location>${skill.location}</location>`);
+    lines.push("  </skill>");
+  }
+  lines.push("</available_skills>");
+
+  return [
+    "## Available Skills",
+    "Before replying: scan <available_skills> descriptions.",
+    "- If a skill clearly applies: read its file, then follow it.",
+    "- If none apply: proceed without reading any skill file.",
+    "",
+    lines.join("\n"),
+  ].join("\n");
+}
+
+function extractSkillDescription(content: string): string {
+  // Try first non-heading, non-empty line
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("---") || trimmed.startsWith(">")) continue;
+    return trimmed.slice(0, 256);
+  }
+  return "Skill";
 }
