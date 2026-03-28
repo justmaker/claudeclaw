@@ -8,7 +8,7 @@ import {
   incrementThreadTurn,
   markThreadCompactWarned,
 } from "./sessionManager";
-import { getSettings, type ModelConfig, type SecurityConfig } from "./config";
+import { getSettings, type ModelConfig, type SecurityConfig, loadWorkspacePrompts, loadWorkspaceSkills } from "./config";
 import { buildClockPromptPrefix } from "./timezone";
 import { selectModel } from "./model-router";
 
@@ -401,6 +401,14 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
     "You are running inside ClaudeClaw.",
   ];
   if (promptContent) appendParts.push(promptContent);
+
+  // Load workspace prompts (OpenClaw convention: AGENTS.md, SOUL.md, TOOLS.md, etc.)
+  const workspacePrompts = await loadWorkspacePrompts();
+  if (workspacePrompts) appendParts.push(workspacePrompts);
+
+  // Load workspace skills (OpenClaw convention: available_skills XML)
+  const workspaceSkills = await loadWorkspaceSkills();
+  if (workspaceSkills) appendParts.push(workspaceSkills);
 
   // Load the project's CLAUDE.md if it exists
   if (existsSync(PROJECT_CLAUDE_MD)) {
