@@ -848,7 +848,7 @@ async function handleGuildCreate(token: string, guild: DiscordGuild): Promise<vo
 
 // --- Discord.js Gateway ---
 
-import { Client, GatewayIntentBits, Events, type Interaction } from "discord.js";
+import { Client, GatewayIntentBits, Events, Partials, type Interaction } from "discord.js";
 
 let client: Client | null = null;
 let running = true;
@@ -918,6 +918,7 @@ export function startGateway(debug = false): void {
       GatewayIntentBits.DirectMessages,
       GatewayIntentBits.MessageContent,
     ],
+    partials: [Partials.Channel],
   });
 
   console.log("Discord bot started (discord.js)");
