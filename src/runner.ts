@@ -156,6 +156,24 @@ async function runClaudeOnce(
       exitCode: proc.exitCode ?? 1,
     };
   } catch (err) {
+    // Capture partial output before killing
+    let partialStdout = "";
+    let partialStderr = "";
+    try {
+      // Give 2s to drain buffered output
+      const drainTimeout = (ms: number) => new Promise<string>((resolve) => {
+        setTimeout(() => resolve(""), ms);
+      });
+      partialStdout = await Promise.race([
+        new Response(proc.stdout).text(),
+        drainTimeout(2000),
+      ]);
+      partialStderr = await Promise.race([
+        new Response(proc.stderr).text(),
+        drainTimeout(2000),
+      ]);
+    } catch {}
+
     // Kill the hung process
     try { proc.kill("SIGTERM"); } catch {}
     setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, 5000);
@@ -163,9 +181,16 @@ async function runClaudeOnce(
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[${new Date().toLocaleTimeString()}] ${message}`);
 
+    // Build actionable error message
+    const timeoutMin = Math.round(timeoutMs / 60000);
+    const lastOutput = (partialStdout || "").trim().split("\n").slice(-5).join("\n").trim();
+    const hint = lastOutput
+      ? `⏱️ Timeout after ${timeoutMin}min. Last output:\n\`\`\`\n${lastOutput.slice(-500)}\n\`\`\`\n💡 Try: simplify the task, break it into smaller steps, or ask me to retry.`
+      : `⏱️ Timeout after ${timeoutMin}min (no output captured).\n💡 The task may be too complex. Try breaking it into smaller steps.`;
+
     return {
       rawStdout: "",
-      stderr: message,
+      stderr: hint,
       exitCode: 124,
     };
   }
