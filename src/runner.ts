@@ -14,6 +14,7 @@ import { selectToken, recordUsage, isRateLimited, type TokenPoolConfig } from ".
 import { buildClockPromptPrefix } from "./timezone";
 import { selectModel } from "./model-router";
 import { getOAuthToken } from "./oauth-provider";
+import { isExternalProvider, runWithProvider } from "./providers";
 import { homedir } from "os";
 import { ProgressReporter, type ProgressCallback } from "./progress-reporter";
 import { recordMetrics } from "./metrics";
@@ -474,6 +475,37 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
     model: fallback?.model ?? "",
     api: fallback?.api ?? "",
   };
+
+  // --- External Provider 路由（OpenAI、Anthropic HTTP、Google、Bedrock 等）---
+  if (isExternalProvider(primaryConfig.model, settings.providers)) {
+    console.log(
+      `[${new Date().toLocaleTimeString()}] Routing to external provider for model: ${primaryConfig.model}`
+    );
+    const timeoutMs = (settings as any).sessionTimeoutMs || CLAUDE_TIMEOUT_MS;
+    const result = await runWithProvider(prompt, primaryConfig.model, settings.providers, { timeoutMs });
+
+    try {
+      const source = name.includes("heartbeat") ? "heartbeat"
+        : name.includes("discord") ? "discord"
+        : name.includes("telegram") ? "telegram"
+        : name;
+      await recordMetrics({
+        timestamp: new Date().toISOString(),
+        source,
+        model: primaryConfig.model,
+        token_usage: { input: 0, output: 0 },
+        duration_ms: Date.now() - startTime,
+        exit_code: result.exitCode,
+        session_id: "external",
+        thread_id: threadId ?? null,
+      });
+    } catch (e) {
+      console.error(`[${new Date().toLocaleTimeString()}] Failed to record metrics:`, e);
+    }
+
+    return result;
+  }
+
   const securityArgs = buildSecurityArgs(security);
   const timeoutMs = (settings as any).sessionTimeoutMs || CLAUDE_TIMEOUT_MS;
 

@@ -71,6 +71,7 @@ const DEFAULT_SETTINGS: Settings = {
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "", localModel: "large-v3", language: "", initialPrompt: "" },
   workspace: { path: "" },
+  providers: {},
   maxConcurrent: 3,
 };
 
@@ -136,10 +137,12 @@ export interface Settings {
   web: WebConfig;
   stt: SttConfig;
   workspace: WorkspaceConfig;
+  providers: ProvidersConfig;
   maxConcurrent: number;
 }
 
 export type { TokenPoolEntry, TokenStrategy, TokenPoolConfig };
+export type { ProvidersConfig } from "./providers/types";
 
 export interface AgenticMode {
   name: string;
@@ -280,6 +283,22 @@ function parseCronJobs(raw: unknown): CronJob[] {
   return jobs;
 }
 
+function parseProvidersConfig(raw: any): ProvidersConfig {
+  if (!raw || typeof raw !== "object") return {};
+  const result: ProvidersConfig = {};
+  const str = (v: any) => typeof v === "string" ? v.trim() : "";
+  if (raw.openai?.apiKey) result.openai = { apiKey: str(raw.openai.apiKey), ...(raw.openai.baseUrl ? { baseUrl: str(raw.openai.baseUrl) } : {}) };
+  if (raw.anthropic?.apiKey) result.anthropic = { apiKey: str(raw.anthropic.apiKey), ...(raw.anthropic.baseUrl ? { baseUrl: str(raw.anthropic.baseUrl) } : {}) };
+  if (raw.google?.apiKey) result.google = { apiKey: str(raw.google.apiKey), ...(raw.google.baseUrl ? { baseUrl: str(raw.google.baseUrl) } : {}) };
+  if (raw.bedrock?.accessKeyId) result.bedrock = { region: str(raw.bedrock.region) || "us-east-1", accessKeyId: str(raw.bedrock.accessKeyId), secretAccessKey: str(raw.bedrock.secretAccessKey) };
+  if (raw.ollama) result.ollama = { ...(raw.ollama.baseUrl ? { baseUrl: str(raw.ollama.baseUrl) } : {}) };
+  if (raw["workers-ai"]?.apiToken) result["workers-ai"] = { accountId: str(raw["workers-ai"].accountId), apiToken: str(raw["workers-ai"].apiToken) };
+  if (raw.groq?.apiKey) result.groq = { apiKey: str(raw.groq.apiKey), ...(raw.groq.baseUrl ? { baseUrl: str(raw.groq.baseUrl) } : {}) };
+  if (raw.deepseek?.apiKey) result.deepseek = { apiKey: str(raw.deepseek.apiKey), ...(raw.deepseek.baseUrl ? { baseUrl: str(raw.deepseek.baseUrl) } : {}) };
+  if (raw.copilot?.apiKey) result.copilot = { apiKey: str(raw.copilot.apiKey), ...(raw.copilot.baseUrl ? { baseUrl: str(raw.copilot.baseUrl) } : {}) };
+  return result;
+}
+
 function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string[]): Settings {
   const rawLevel = raw.security?.level;
   const level: SecurityLevel =
@@ -363,6 +382,7 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
     workspace: {
       path: typeof raw.workspace?.path === "string" ? raw.workspace.path.trim() : "",
     },
+    providers: parseProvidersConfig(raw.providers),
     maxConcurrent: typeof raw.maxConcurrent === "number" && raw.maxConcurrent >= 1 ? raw.maxConcurrent : 3,
   };
 }
