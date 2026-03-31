@@ -12,6 +12,10 @@ const LOGS_DIR = join(HEARTBEAT_DIR, "logs");
 const DEFAULT_SETTINGS: Settings = {
   model: "",
   api: "",
+  auth: {
+    mode: "api-key",
+    oauthCredentialsPath: "~/.claude/.credentials.json",
+  },
   fallback: {
     model: "",
     api: "",
@@ -104,9 +108,17 @@ export interface SecurityConfig {
   disallowedTools: string[];
 }
 
+export type AuthMode = "api-key" | "oauth" | "auto";
+
+export interface AuthConfig {
+  mode: AuthMode;
+  oauthCredentialsPath: string;
+}
+
 export interface Settings {
   model: string;
   api: string;
+  auth: AuthConfig;
   fallback: ModelConfig;
   tokenPool: TokenPoolEntry[];
   tokenStrategy: TokenStrategy;
@@ -171,6 +183,9 @@ export interface SttConfig {
   /** Initial prompt / context hint for better transcription accuracy. */
   initialPrompt: string;
 }
+
+// Re-export settings watcher for convenient access
+export { onSettingsChange, startSettingsWatcher, stopSettingsWatcher } from "./settings-watcher";
 
 let cached: Settings | null = null;
 
@@ -253,6 +268,15 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
   return {
     model: typeof raw.model === "string" ? raw.model.trim() : "",
     api: typeof raw.api === "string" ? raw.api.trim() : "",
+    auth: {
+      mode: (["api-key", "oauth", "auto"] as const).includes(raw.auth?.mode)
+        ? raw.auth.mode
+        : "api-key",
+      oauthCredentialsPath:
+        typeof raw.auth?.oauthCredentialsPath === "string" && raw.auth.oauthCredentialsPath.trim()
+          ? raw.auth.oauthCredentialsPath.trim()
+          : "~/.claude/.credentials.json",
+    },
     fallback: {
       model: typeof raw.fallback?.model === "string" ? raw.fallback.model.trim() : "",
       api: typeof raw.fallback?.api === "string" ? raw.fallback.api.trim() : "",

@@ -12,6 +12,8 @@ import { getSettings, type ModelConfig, type SecurityConfig, loadWorkspacePrompt
 import { selectToken, recordUsage, isRateLimited, type TokenPoolConfig } from "./token-pool";
 import { buildClockPromptPrefix } from "./timezone";
 import { selectModel } from "./model-router";
+import { getOAuthToken } from "./oauth-provider";
+import { homedir } from "os";
 
 const LOGS_DIR = join(process.cwd(), ".claude/claudeclaw/logs");
 // Resolve prompts relative to the claudeclaw installation, not the project dir

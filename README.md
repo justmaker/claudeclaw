@@ -71,7 +71,7 @@ The setup wizard walks you through model, heartbeat, Telegram, Discord, and secu
 ## Features
 
 ### Automation
-- **Heartbeat:** Periodic check-ins with configurable intervals, quiet hours, and editable prompts.
+- **Heartbeat:** Periodic check-ins with configurable intervals, quiet hours, dedicated model override, and per-channel forwarding control. Each heartbeat includes model info, session turn count, last heartbeat time, and context usage percentage.
 - **Cron Jobs:** Timezone-aware schedules for repeating or one-time tasks with reliable execution.
 
 ### Communication
@@ -146,6 +146,37 @@ logger.error("Connection failed", { error: "timeout", retry: 3 });
 
 團隊有多個 Claude 帳號時，可設定 token pool 自動輪轉和 rate limit 切換。
 
+### Heartbeat 設定
+
+在 `settings.json` 的 `heartbeat` 欄位設定：
+
+```json
+{
+  "heartbeat": {
+    "enabled": true,
+    "interval": 60,
+    "model": "sonnet",
+    "prompt": "",
+    "forwardToTelegram": true,
+    "forwardToDiscord": false,
+    "excludeWindows": [
+      { "start": "23:00", "end": "08:00" }
+    ]
+  }
+}
+```
+
+| 欄位 | 說明 |
+|------|------|
+| `model` | Heartbeat 專用 model，空字串時使用全域 `model` |
+| `forwardToTelegram` | HEARTBEAT_OK 也轉發到 Telegram（非 OK 訊息一律轉發） |
+| `forwardToDiscord` | HEARTBEAT_OK 也轉發到 Discord（非 OK 訊息一律轉發） |
+| `excludeWindows` | 深夜靜默時段，支援跨日（如 23:00→08:00）及指定星期幾 |
+
+每次 heartbeat 會自動注入狀態資訊供 Claude 參考：使用的 model、session turn count、上次 heartbeat 時間、context 用量百分比。
+
+### Token Pool
+
 在 `settings.json` 新增 `tokenPool` 和 `tokenStrategy`：
 
 ```json
@@ -174,6 +205,46 @@ logger.error("Connection failed", { error: "timeout", retry: 3 });
 ### Rate Limit 偵測
 
 自動檢查 Claude 輸出中的 "you've hit your limit" 或 "out of extra usage" 訊息，觸發切換。
+
+## OAuth 認證（使用 Claude CLI Token）
+
+ClaudeClaw 支援使用 Claude CLI 的 OAuth token 呼叫 Anthropic API，省去額外的 API 費用。
+
+在 `settings.json` 加入 `auth` 設定：
+
+```json
+{
+  "auth": {
+    "mode": "oauth",
+    "oauthCredentialsPath": "~/.claude/.credentials.json"
+  }
+}
+```
+
+### 模式
+
+| mode | 行為 |
+|------|------|
+| `api-key` | 使用 `api` 欄位的 API key（預設，向後相容） |
+| `oauth` | 使用 OAuth token，無 token 則報錯 |
+| `auto` | 優先使用 OAuth token，失敗則 fallback 到 API key |
+
+### 運作原理
+
+1. 讀取 `~/.claude/.credentials.json`（Claude CLI 登入後自動產生）
+2. Token 快過期時自動呼叫 `claude` CLI 觸發 refresh
+3. 30 秒 cache TTL 避免重複讀取磁碟
+
+### 前置條件
+
+- 已安裝 Claude CLI 並完成 `claude login`
+- `~/.claude/.credentials.json` 存在且包含有效的 OAuth token
+
+### ⚠️ 風險警告
+
+> **此功能使用 Claude CLI 的 OAuth token 透過非官方方式呼叫 API。**
+> 這可能違反 Anthropic 的服務條款（Terms of Service）。使用此功能的風險由使用者自行承擔。
+> Anthropic 可能隨時變更認證機制，導致此功能失效。
 
 ## STT / 語音辨識設定
 
