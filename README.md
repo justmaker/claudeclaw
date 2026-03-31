@@ -258,6 +258,20 @@ Setup wizard 會引導你設定 model、heartbeat、Telegram、Discord 等，完
 
 ## Features
 
+### Subagent 系統
+
+讓主 agent spawn 獨立的 Claude CLI 子 agent，真正並行處理任務。
+
+- `spawnSubagent()` — 啟動獨立子 agent
+- `listSubagents()` / `killSubagent(id)` / `steerSubagent(id, msg)` — 管理介面
+- Discord `/subagents` slash command
+- `[spawn:label]prompt[/spawn]` 語法觸發
+- IPC：result 檔案 `~/.claude/claudeclaw/subagents/{id}.result.json` + file watcher
+
+```json
+{ "subagents": { "maxConcurrent": 5, "defaultModel": "sonnet", "timeoutMs": 600000 } }
+```
+
 ### Multi-Provider 支援
 
 ClaudeClaw 支援多種 AI provider，根據 model 名稱前綴自動路由：

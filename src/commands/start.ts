@@ -324,6 +324,8 @@ export async function start(args: string[] = []) {
 
   async function shutdown() {
     const { shutdownAll } = await import("../process-manager");
+    const { shutdownAllSubagents } = await import("../subagent");
+    await shutdownAllSubagents();
     const result = await shutdownAll(5000);
     if (result.terminated.length > 0)
       console.log(`Gracefully terminated: ${result.terminated.join(", ")}`);

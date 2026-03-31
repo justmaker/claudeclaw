@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { transcribeAudioToText } from "../whisper";
 import { resolveSkillPrompt, listSkillsWithMetadata, formatSkillsList } from "../skills";
+import { listSubagents, killSubagent } from "../subagent";
 import { getMetricsSummary } from "../metrics";
 import { mkdir } from "node:fs/promises";
 import { extname, join } from "node:path";
@@ -354,6 +355,15 @@ async function registerSlashCommands(token: string): Promise<void> {
       name: "skills",
       description: "List all available skills",
       type: 1,
+    },
+    {
+      name: "subagents",
+      description: "List or kill running subagents",
+      type: 1,
+      options: [
+        { name: "action", description: "Action", type: 3, required: false, choices: [{ name: "list", value: "list" }, { name: "kill", value: "kill" }] },
+        { name: "id", description: "Subagent ID to kill", type: 3, required: false },
+      ],
     },
     {
       name: "cron",
@@ -860,6 +870,31 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
           content: `Failed to list skills: ${err instanceof Error ? err.message : err}`,
         });
       }
+      return;
+    }
+
+    if (interaction.data.name === "subagents") {
+      const action = interaction.data.options?.find((o: any) => o.name === "action")?.value ?? "list";
+      const targetId = interaction.data.options?.find((o: any) => o.name === "id")?.value;
+      if (action === "kill" && targetId) {
+        const killed = killSubagent(targetId);
+        await respondToInteraction(interaction, {
+          content: killed ? `🔪 Subagent \`${targetId}\` 已終止。` : `❌ 找不到 running subagent \`${targetId}\``,
+        });
+        return;
+      }
+      const sa = listSubagents();
+      if (sa.length === 0) {
+        await respondToInteraction(interaction, { content: "📭 目前沒有 subagent。" });
+        return;
+      }
+      const lines = sa.map((a) => {
+        const emoji = a.status === "running" ? "🔄" : a.status === "completed" ? "✅" : "❌";
+        return `${emoji} \`${a.id}\` **${a.label}** — ${a.status} (${Math.round(a.runtimeMs / 1000)}s)`;
+      });
+      await respondToInteraction(interaction, {
+        content: `🤖 **Subagents (${sa.length})**\n${lines.join("\n")}`.slice(0, 2000),
+      });
       return;
     }
 
