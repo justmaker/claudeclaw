@@ -81,7 +81,7 @@ The setup wizard walks you through model, heartbeat, Telegram, Discord, and secu
 
 ### Multi-Session Threads (Discord)
 - **Independent Thread Sessions:** Each Discord thread gets its own Claude CLI session, fully isolated from the main channel.
-- **Parallel Processing:** Thread conversations run concurrently — messages in different threads don't block each other.
+- **Parallel Processing:** Thread conversations run concurrently — messages in different threads don't block each other. Configurable via `maxConcurrent` in `settings.json` (default: 3).
 - **Auto-Create:** First message in a new thread automatically bootstraps a fresh session. No setup needed.
 - **Session Cleanup:** Thread sessions are automatically cleaned up when threads are deleted or archived.
 - **Backward Compatible:** DMs and main channel messages continue using the global session.
@@ -94,6 +94,7 @@ See [docs/MULTI_SESSION.md](docs/MULTI_SESSION.md) for technical details.
 - **Security Levels:** Four access levels from read-only to full system access.
 - **Model Selection:** Switch models based on your workload.
 - **Settings Hot-Reload:** Changes to `settings.json` are detected automatically via `fs.watch()` with 500ms debounce — no restart needed for heartbeat, STT, and token pool changes.
+- **Session Metrics:** Every session execution is logged to `~/.claude/claudeclaw/metrics.jsonl` with timestamp, source, model, duration, and exit code. Use `/metrics` in Discord to view a 7-day summary.
 
 ## Structured Logging
 

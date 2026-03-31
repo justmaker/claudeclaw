@@ -1,5 +1,6 @@
-import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession } from "../runner";
+import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession, onProgress, clearProgressCallback } from "../runner";
 import { getSettings, loadSettings } from "../config";
+import { getQueueManager } from "../queue-manager";
 import { resetSession, peekSession } from "../sessions";
 import { listThreadSessions, removeThreadSession, peekThreadSession } from "../sessionManager";
 import { readFile } from "node:fs/promises";
@@ -7,6 +8,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { transcribeAudioToText } from "../whisper";
 import { resolveSkillPrompt } from "../skills";
+import { getMetricsSummary } from "../metrics";
 import { mkdir } from "node:fs/promises";
 import { extname, join } from "node:path";
 
@@ -327,6 +329,11 @@ async function registerSlashCommands(token: string): Promise<void> {
       description: "Show context window usage",
       type: 1,
     },
+    {
+      name: "metrics",
+      description: "Show session metrics summary (last 7 days)",
+      type: 1,
+    },
   ];
 
   await discordApi(
@@ -574,7 +581,9 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
     const prefixedPrompt = promptParts.join("\n");
     // Use thread-specific session if message is in a known thread
     const threadId = knownThreads.has(channelId) ? channelId : undefined;
-    const result = await runUserMessage("discord", prefixedPrompt, threadId);
+    const queueId = threadId || channelId;
+    const qm = getQueueManager(getSettings().maxConcurrent);
+    const result = await qm.enqueue(queueId, () => runUserMessage("discord", prefixedPrompt, threadId));
 
     if (result.exitCode !== 0) {
       await sendMessage(config.token, channelId, `Error (exit ${result.exitCode}): ${result.stderr || result.stdout || "Unknown error"}`);
@@ -722,6 +731,37 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
       } catch (err) {
         await respondToInteraction(interaction, {
           content: `Failed to read context: ${err instanceof Error ? err.message : err}`,
+        });
+      }
+      return;
+    }
+
+    if (interaction.data.name === "metrics") {
+      try {
+        const summary = await getMetricsSummary(7);
+        const bySource = Object.entries(summary.by_source).map(([k, v]) => `  ${k}: ${v}`).join("\n") || "  (none)";
+        const byModel = Object.entries(summary.by_model).map(([k, v]) => `  ${k}: ${v}`).join("\n") || "  (none)";
+        const lines = [
+          `📊 **Session Metrics** (last ${summary.period_days} days)`,
+          ``,
+          `Total sessions: **${summary.total_sessions}**`,
+          `Success rate: **${summary.success_rate}** (${summary.success_count}✅ / ${summary.failure_count}❌)`,
+          `Avg duration: **${(summary.avg_duration_ms / 1000).toFixed(1)}s**`,
+          ``,
+          `**Tokens**`,
+          `  Input: \`${summary.total_input_tokens.toLocaleString()}\``,
+          `  Output: \`${summary.total_output_tokens.toLocaleString()}\``,
+          ``,
+          `**By Source**`,
+          bySource,
+          ``,
+          `**By Model**`,
+          byModel,
+        ];
+        await respondToInteraction(interaction, { content: lines.join("\n") });
+      } catch (err) {
+        await respondToInteraction(interaction, {
+          content: `Failed to load metrics: ${err instanceof Error ? err.message : err}`,
         });
       }
       return;

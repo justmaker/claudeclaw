@@ -15,6 +15,8 @@ import { buildClockPromptPrefix } from "./timezone";
 import { selectModel } from "./model-router";
 import { getOAuthToken } from "./oauth-provider";
 import { homedir } from "os";
+import { ProgressReporter, type ProgressCallback } from "./progress-reporter";
+import { recordMetrics } from "./metrics";
 
 const LOGS_DIR = join(process.cwd(), ".claude/claudeclaw/logs");
 // Resolve prompts relative to the claudeclaw installation, not the project dir
@@ -34,6 +36,19 @@ const CLAUDECLAW_BLOCK_END = "<!-- claudeclaw:managed:end -->";
  */
 const COMPACT_WARN_THRESHOLD = 25;
 const COMPACT_TIMEOUT_ENABLED = true;
+
+/** Global progress callback — set by platform handlers (Discord/Telegram) to receive progress updates. */
+let globalProgressCallback: ProgressCallback | null = null;
+
+/** Register a progress callback for long-running tasks. */
+export function onProgress(callback: ProgressCallback): void {
+  globalProgressCallback = callback;
+}
+
+/** Clear the progress callback. */
+export function clearProgressCallback(): void {
+  globalProgressCallback = null;
+}
 
 export type CompactEvent =
   | { type: "warn"; turnCount: number }
@@ -128,7 +143,8 @@ async function runClaudeOnce(
   model: string,
   api: string,
   baseEnv: Record<string, string>,
-  timeoutMs: number = CLAUDE_TIMEOUT_MS
+  timeoutMs: number = CLAUDE_TIMEOUT_MS,
+  progressCallback?: ProgressCallback | null
 ): Promise<{ rawStdout: string; stderr: string; exitCode: number }> {
   const args = [...baseArgs];
   const normalizedModel = model.trim().toLowerCase();
@@ -142,20 +158,46 @@ async function runClaudeOnce(
 
   registerChildProcess(proc.pid, `claude-${model || "default"}`);
 
+  // Set up progress reporter if callback is registered
+  const progressReporter = progressCallback
+    ? new ProgressReporter({ intervalMs: 60_000, onProgress: progressCallback })
+    : null;
+  progressReporter?.start();
+
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error(`Claude session timed out after ${timeoutMs / 1000}s`)), timeoutMs);
   });
 
   try {
+    // Read stdout in chunks to feed progress reporter
+    const stdoutChunks: string[] = [];
+    const stdoutReader = async (): Promise<string> => {
+      const reader = proc.stdout.getReader();
+      const decoder = new TextDecoder();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = decoder.decode(value, { stream: true });
+          stdoutChunks.push(text);
+          progressReporter?.feed(text);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      return stdoutChunks.join("");
+    };
+
     const [rawStdout, stderr] = await Promise.race([
       Promise.all([
-        new Response(proc.stdout).text(),
+        stdoutReader(),
         new Response(proc.stderr).text(),
       ]),
       timeoutPromise,
     ]) as [string, string];
     await proc.exited;
     unregisterChildProcess(proc.pid);
+    progressReporter?.stop();
 
     return {
       rawStdout,
@@ -180,6 +222,8 @@ async function runClaudeOnce(
         drainTimeout(2000),
       ]);
     } catch {}
+
+    progressReporter?.stop();
 
     // Kill the hung process
     try { proc.kill("SIGTERM"); } catch {}
@@ -382,6 +426,7 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
     ? await getThreadSession(threadId)
     : await getSession();
   const isNew = !existing;
+  const startTime = Date.now();
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const logFile = join(LOGS_DIR, `${name}-${timestamp}.log`);
 
@@ -497,7 +542,7 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
     }
   }
 
-  let exec = await runClaudeOnce(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs);
+  let exec = await runClaudeOnce(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs, globalProgressCallback);
   const primaryRateLimit = extractRateLimitMessage(exec.rawStdout, exec.stderr);
   let usedFallback = false;
 
@@ -648,6 +693,26 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
       }
       emitCompactEvent({ type: "warn", turnCount });
     }
+  }
+
+  // --- Record metrics ---
+  try {
+    const source = name.includes("heartbeat") ? "heartbeat"
+      : name.includes("discord") ? "discord"
+      : name.includes("telegram") ? "telegram"
+      : name;
+    await recordMetrics({
+      timestamp: new Date().toISOString(),
+      source,
+      model: primaryConfig.model || "default",
+      token_usage: { input: 0, output: 0 },
+      duration_ms: Date.now() - startTime,
+      exit_code: result.exitCode,
+      session_id: sessionId,
+      thread_id: threadId ?? null,
+    });
+  } catch (e) {
+    console.error(`[${new Date().toLocaleTimeString()}] Failed to record metrics:`, e);
   }
 
   return result;
