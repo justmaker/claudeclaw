@@ -3,6 +3,7 @@ import { mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import { normalizeTimezoneName, resolveTimezoneOffsetMinutes } from "./timezone";
 import { type TokenPoolEntry, type TokenStrategy, parseTokenPoolConfig, type TokenPoolConfig } from "./token-pool";
+import type { CronJob } from "./cron-scheduler";
 
 const HEARTBEAT_DIR = join(process.cwd(), ".claude", "claudeclaw");
 const SETTINGS_FILE = join(HEARTBEAT_DIR, "settings.json");
@@ -65,11 +66,18 @@ const DEFAULT_SETTINGS: Settings = {
   },
   telegram: { token: "", allowedUserIds: [] },
   discord: { token: "", allowedUserIds: [], listenChannels: [] },
+  signal: { enabled: false, phone: "", apiUrl: "http://localhost:8080", allowedNumbers: [] },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
+  cron: [],
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "", localModel: "large-v3", language: "", initialPrompt: "" },
   workspace: { path: "" },
   maxConcurrent: 3,
+  streaming: {
+    enabled: false,
+    updateIntervalMs: 2000,
+    minChunkChars: 50,
+  },
 };
 
 export interface HeartbeatExcludeWindow {
@@ -95,6 +103,13 @@ export interface DiscordConfig {
   token: string;
   allowedUserIds: string[]; // Discord snowflake IDs exceed Number.MAX_SAFE_INTEGER
   listenChannels: string[]; // Channel IDs where bot responds to all messages (no mention needed)
+}
+
+export interface SignalConfig {
+  enabled: boolean;
+  phone: string;
+  apiUrl: string;
+  allowedNumbers: string[];
 }
 
 export type SecurityLevel =
@@ -127,13 +142,16 @@ export interface Settings {
   timezone: string;
   timezoneOffsetMinutes: number;
   heartbeat: HeartbeatConfig;
+  cron: CronJob[];
   telegram: TelegramConfig;
   discord: DiscordConfig;
+  signal: SignalConfig;
   security: SecurityConfig;
   web: WebConfig;
   stt: SttConfig;
   workspace: WorkspaceConfig;
   maxConcurrent: number;
+  streaming: StreamingConfig;
 }
 
 export type { TokenPoolEntry, TokenStrategy, TokenPoolConfig };
@@ -160,6 +178,15 @@ export interface WebConfig {
   enabled: boolean;
   host: string;
   port: number;
+}
+
+export interface StreamingConfig {
+  /** 是否啟用 streaming mode，預設 false（向後相容） */
+  enabled: boolean;
+  /** 訊息更新間隔（毫秒），預設 2000 */
+  updateIntervalMs: number;
+  /** 最小累積字元數才觸發中繼更新，預設 50 */
+  minChunkChars: number;
 }
 
 export interface WorkspaceConfig {
@@ -258,6 +285,25 @@ function parseAgenticConfig(raw: any): AgenticConfig {
   };
 }
 
+function parseCronJobs(raw: unknown): CronJob[] {
+  if (!Array.isArray(raw)) return [];
+  const jobs: CronJob[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    const cron = typeof entry.cron === "string" ? entry.cron.trim() : "";
+    if (!name || !cron) continue;
+    const prompt = typeof entry.prompt === "string" ? entry.prompt.trim() : "";
+    const model = typeof entry.model === "string" ? entry.model.trim() : undefined;
+    const target = (["telegram", "discord", "both"] as const).includes(entry.target)
+      ? entry.target as "telegram" | "discord" | "both"
+      : undefined;
+    const enabled = entry.enabled !== false;
+    jobs.push({ name, cron, prompt, model, target, enabled });
+  }
+  return jobs;
+}
+
 function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string[]): Settings {
   const rawLevel = raw.security?.level;
   const level: SecurityLevel =
@@ -301,6 +347,7 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
       excludeWindows: parseExcludeWindows(raw.heartbeat?.excludeWindows),
       forwardToTelegram: raw.heartbeat?.forwardToTelegram ?? false,
     },
+    cron: parseCronJobs(raw.cron),
     telegram: {
       token: raw.telegram?.token ?? "",
       allowedUserIds: raw.telegram?.allowedUserIds ?? [],
@@ -314,6 +361,14 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
             : [],
       listenChannels: Array.isArray(raw.discord?.listenChannels)
         ? raw.discord.listenChannels.map(String)
+        : [],
+    },
+    signal: {
+      enabled: raw.signal?.enabled ?? false,
+      phone: typeof raw.signal?.phone === "string" ? raw.signal.phone.trim() : "",
+      apiUrl: typeof raw.signal?.apiUrl === "string" ? raw.signal.apiUrl.trim() : "http://localhost:8080",
+      allowedNumbers: Array.isArray(raw.signal?.allowedNumbers)
+        ? raw.signal.allowedNumbers.map(String)
         : [],
     },
     security: {
@@ -341,6 +396,13 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
       path: typeof raw.workspace?.path === "string" ? raw.workspace.path.trim() : "",
     },
     maxConcurrent: typeof raw.maxConcurrent === "number" && raw.maxConcurrent >= 1 ? raw.maxConcurrent : 3,
+    streaming: {
+      enabled: raw.streaming?.enabled === true,
+      updateIntervalMs: typeof raw.streaming?.updateIntervalMs === "number" && raw.streaming.updateIntervalMs >= 500
+        ? raw.streaming.updateIntervalMs : 2000,
+      minChunkChars: typeof raw.streaming?.minChunkChars === "number" && raw.streaming.minChunkChars >= 0
+        ? raw.streaming.minChunkChars : 50,
+    },
   };
 }
 

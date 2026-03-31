@@ -5,6 +5,7 @@ import { run, runUserMessage, bootstrap, ensureProjectClaudeMd, loadHeartbeatPro
 import { writeState, type StateData } from "../statusline";
 import { cronMatches, nextCronMatch } from "../cron";
 import { clearJobSchedule, loadJobs } from "../jobs";
+import { CronScheduler, setCronSchedulerInstance } from "../cron-scheduler";
 import { writePidFile, cleanupPidFile, checkExistingDaemon } from "../pid";
 import { initConfig, loadSettings, reloadSettings, resolvePrompt, type HeartbeatConfig, type Settings, startSettingsWatcher, onSettingsChange } from "../config";
 import { getDayAndMinuteAtOffset } from "../timezone";
@@ -404,6 +405,24 @@ export async function start(args: string[] = []) {
   await initDiscord(currentSettings.discord.token);
   if (!discordToken) console.log("  Discord: not configured");
 
+  // --- Signal ---
+  let signalEnabled = false;
+
+  async function initSignal(settings: Settings) {
+    if (settings.signal.enabled && settings.signal.phone && !signalEnabled) {
+      const { startPolling } = await import("./signal");
+      startPolling(debugFlag);
+      signalEnabled = true;
+      console.log(`[${ts()}] Signal: enabled (${settings.signal.phone})`);
+    } else if (!settings.signal.enabled && signalEnabled) {
+      signalEnabled = false;
+      console.log(`[${ts()}] Signal: disabled`);
+    }
+  }
+
+  await initSignal(currentSettings);
+  if (!signalEnabled) console.log("  Signal: not configured");
+
   function isAddrInUse(err: unknown): boolean {
     if (!err || typeof err !== "object") return false;
     const code = "code" in err ? String((err as { code?: unknown }).code) : "";
@@ -628,6 +647,32 @@ export async function start(args: string[] = []) {
 
   if (currentSettings.heartbeat.enabled) scheduleHeartbeat();
 
+  // --- Cron Scheduler ---
+  const cronScheduler = new CronScheduler({
+    timezoneOffsetMinutes: currentSettings.timezoneOffsetMinutes,
+  });
+  setCronSchedulerInstance(cronScheduler);
+
+  cronScheduler.loadJobs(currentSettings.cron);
+  cronScheduler.onJobTriggered(async (job) => {
+    console.log(`[${ts()}] [cron] Executing job: ${job.name}`);
+    const result = await run(job.name, job.prompt);
+    const target = job.target ?? "both";
+    if (target === "telegram" || target === "both") {
+      forwardToTelegram(job.name, result);
+    }
+    if (target === "discord" || target === "both") {
+      forwardToDiscord(job.name, result);
+    }
+  });
+  cronScheduler.start();
+  if (cronScheduler.jobCount > 0) {
+    console.log(`[${ts()}] Cron scheduler started: ${cronScheduler.enabledJobs.length}/${cronScheduler.jobCount} jobs enabled`);
+    for (const s of cronScheduler.getStatus()) {
+      console.log(`    - ${s.name} [${s.cron}] ${s.enabled !== false ? `next: ${s.nextAt.toLocaleString()}` : "(disabled)"}`);
+    }
+  }
+
   // --- Event-driven settings watcher (debounced fs.watch) ---
   startSettingsWatcher(currentSettings);
   onSettingsChange((newSettings, _oldSettings) => {
@@ -648,6 +693,15 @@ export async function start(args: string[] = []) {
     } else {
       currentSettings = newSettings;
     }
+
+    // Cron scheduler hot-reload
+    const cronChanged = JSON.stringify(newSettings.cron) !== JSON.stringify(_oldSettings.cron);
+    if (cronChanged) {
+      console.log(`[${ts()}] [settings-watcher] Cron config changed — reloading jobs`);
+      cronScheduler.loadJobs(newSettings.cron);
+    }
+    cronScheduler.setTimezoneOffset(newSettings.timezoneOffsetMinutes);
+
     if (web) {
       currentSettings.web.enabled = true;
       currentSettings.web.port = web.port;
@@ -708,6 +762,9 @@ export async function start(args: string[] = []) {
 
       // Discord changes
       await initDiscord(newSettings.discord.token);
+
+      // Signal changes
+      await initSignal(newSettings);
     } catch (err) {
       console.error(`[${ts()}] Hot-reload error:`, err);
     }
@@ -727,6 +784,7 @@ export async function start(args: string[] = []) {
       security: currentSettings.security.level,
       telegram: !!currentSettings.telegram.token,
       discord: !!currentSettings.discord.token,
+      signal: currentSettings.signal.enabled,
       startedAt: daemonStartedAt,
       web: {
         enabled: !!web,

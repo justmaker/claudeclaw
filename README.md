@@ -23,7 +23,7 @@
 
 <p align="center"><b>A lightweight, open-source OpenClaw alternative built on Claude Code.</b></p>
 
-ClaudeClaw 把你的 Claude Code 變成一個永不停歇的個人助理。它以背景 daemon 運行，支援排程任務、Telegram / Discord 訊息互動、語音辨識、多帳號輪轉，以及各種自動化整合。
+ClaudeClaw 把你的 Claude Code 變成一個永不停歇的個人助理。它以背景 daemon 運行，支援排程任務、Telegram / Discord / Signal 訊息互動、語音辨識、多帳號輪轉，以及各種自動化整合。
 
 > ⚠️ 請勿將 ClaudeClaw 用於任何非法活動。
 
@@ -144,6 +144,14 @@ Setup wizard 會引導你設定 model、heartbeat、Telegram、Discord 等，完
     "listenChannels": ["987654321098765432"]
   },
 
+  // ─── Signal ───
+  "signal": {
+    "enabled": false,
+    "phone": "+886912345678",
+    "apiUrl": "http://localhost:8080",
+    "allowedNumbers": ["+886912345678"]
+  },
+
   // ─── 安全 ───
   "security": {
     "level": "moderate",                // "locked" | "strict" | "moderate" | "unrestricted"
@@ -219,6 +227,10 @@ Setup wizard 會引導你設定 model、heartbeat、Telegram、Discord 等，完
 | `discord.token` | string | `""` | Discord Bot token |
 | `discord.allowedUserIds` | string[] | `[]` | 允許的 Discord user ID（snowflake） |
 | `discord.listenChannels` | string[] | `[]` | 不用 @ 即回應的頻道 ID |
+| `signal.enabled` | boolean | `false` | 啟用 Signal channel |
+| `signal.phone` | string | `""` | 註冊在 signal-cli 的手機號碼 |
+| `signal.apiUrl` | string | `"http://localhost:8080"` | signal-cli-rest-api 的 URL |
+| `signal.allowedNumbers` | string[] | `[]` | 允許的 Signal 手機號碼 |
 | `security.level` | string | `"moderate"` | 安全等級 |
 | `web.enabled` | boolean | `false` | 啟用 Web Dashboard |
 | `web.host` | string | `"127.0.0.1"` | Dashboard 綁定位址 |
@@ -339,6 +351,48 @@ Model 檔案首次使用時自動從 HuggingFace 下載。中文建議：`localM
 每次 heartbeat 自動注入狀態資訊：使用的 model、session turn count、上次 heartbeat 時間、context 用量百分比。`excludeWindows` 支援跨日時段與 `days` 星期過濾。非 OK 訊息一律轉發至 Telegram/Discord。
 
 ---
+
+### Signal 設定
+
+Signal channel 使用 [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api) 作為 backend。
+
+#### 1. 啟動 signal-cli-rest-api
+
+```bash
+# Docker 方式（推薦）
+docker run -d --name signal-api \
+  -p 8080:8080 \
+  -v ~/.local/share/signal-cli:/home/.local/share/signal-cli \
+  bbernhard/signal-cli-rest-api
+
+# 或用 native signal-cli + JSON-RPC
+# signal-cli -a +886912345678 jsonRpc --socket 8080
+```
+
+#### 2. 註冊/連結手機號碼
+
+```bash
+# 註冊新號碼
+curl -X POST 'http://localhost:8080/v1/register/+886912345678'
+
+# 或連結到現有 Signal 帳號（掃 QR code）
+curl -X GET 'http://localhost:8080/v1/qrcodelink?device_name=claudeclaw' --output qr.png
+```
+
+#### 3. 設定 claudeclaw
+
+```json
+{
+  "signal": {
+    "enabled": true,
+    "phone": "+886912345678",
+    "apiUrl": "http://localhost:8080",
+    "allowedNumbers": ["+886900000001"]
+  }
+}
+```
+
+啟動 daemon 後，Signal 會自動開始 polling 接收訊息。支援文字、圖片、語音（自動 Whisper 轉文字）。
 
 ### Discord Thread Hire/Fire
 

@@ -9,6 +9,7 @@ export interface StateData {
   security: string;
   telegram: boolean;
   discord: boolean;
+  signal: boolean;
   startedAt: number;
   web?: { enabled: boolean; host: string; port: number };
 }
