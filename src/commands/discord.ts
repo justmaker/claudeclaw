@@ -1,5 +1,6 @@
-import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession, onProgress, clearProgressCallback } from "../runner";
+import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession, onProgress, clearProgressCallback, onStreamChunk, clearStreamCallback } from "../runner";
 import { getSettings, loadSettings } from "../config";
+import { StreamHandler } from "../stream-handler";
 import { getQueueManager } from "../queue-manager";
 import { resetSession, peekSession } from "../sessions";
 import { listThreadSessions, removeThreadSession, peekThreadSession } from "../sessionManager";
@@ -149,6 +150,21 @@ async function sendMessage(
     }
     await discordApi(token, "POST", `/channels/${channelId}/messages`, body);
   }
+}
+
+/** Send a message and return its ID (for later editing). */
+async function sendMessageGetId(
+  token: string, channelId: string, text: string,
+): Promise<string> {
+  const msg = await discordApi<{ id: string }>(token, "POST", `/channels/${channelId}/messages`, { content: text.slice(0, 2000) });
+  return msg.id;
+}
+
+/** Edit an existing message by ID. */
+async function editMessage(
+  token: string, channelId: string, messageId: string, text: string,
+): Promise<void> {
+  await discordApi(token, "PATCH", `/channels/${channelId}/messages/${messageId}`, { content: text.slice(0, 2000) });
 }
 
 async function sendMessageToUser(
@@ -338,6 +354,29 @@ async function registerSlashCommands(token: string): Promise<void> {
       name: "skills",
       description: "List all available skills",
       type: 1,
+    },
+    {
+      name: "cron",
+      description: "List cron jobs or enable/disable a job",
+      type: 1,
+      options: [
+        {
+          name: "action",
+          description: "enable or disable a job",
+          type: 3,
+          required: false,
+          choices: [
+            { name: "enable", value: "enable" },
+            { name: "disable", value: "disable" },
+          ],
+        },
+        {
+          name: "job",
+          description: "Job name to enable/disable",
+          type: 3,
+          required: false,
+        },
+      ],
     },
   ];
 
@@ -594,13 +633,36 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
       sendMessage(config.token, channelId, update.message).catch(() => {});
     });
 
+    // Streaming mode setup
+    const streamingConfig = getSettings().streaming;
+    let streamHandler: StreamHandler | null = null;
+    let placeholderMsgId: string | null = null;
+
+    if (streamingConfig.enabled) {
+      placeholderMsgId = await sendMessageGetId(config.token, channelId, "⏳ 思考中...");
+      streamHandler = new StreamHandler({
+        updateIntervalMs: streamingConfig.updateIntervalMs,
+        minChunkChars: streamingConfig.minChunkChars,
+        onUpdate: (text) => {
+          if (placeholderMsgId) {
+            const truncated = text.length > 2000 ? text.slice(-2000) : text;
+            editMessage(config.token, channelId, placeholderMsgId, truncated || "⏳ 思考中...").catch(() => {});
+          }
+        },
+      });
+      streamHandler.start();
+      onStreamChunk((chunk) => { streamHandler?.push(chunk); });
+    }
+
     const result = await qm.enqueue(queueId, () => runUserMessage("discord", prefixedPrompt, threadId));
 
-    // Clear progress callback after completion
+    if (streamHandler) { await streamHandler.finish(); clearStreamCallback(); }
     clearProgressCallback();
 
     if (result.exitCode !== 0) {
-      await sendMessage(config.token, channelId, `Error (exit ${result.exitCode}): ${result.stderr || result.stdout || "Unknown error"}`);
+      const errText = `Error (exit ${result.exitCode}): ${result.stderr || result.stdout || "Unknown error"}`;
+      if (placeholderMsgId) { await editMessage(config.token, channelId, placeholderMsgId, errText); }
+      else { await sendMessage(config.token, channelId, errText); }
     } else {
       const { cleanedText, reactionEmoji } = extractReactionDirective(result.stdout || "");
       if (reactionEmoji) {
@@ -608,7 +670,14 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
           console.error(`[Discord] Failed to send reaction for ${label}: ${err instanceof Error ? err.message : err}`);
         });
       }
-      await sendMessage(config.token, channelId, cleanedText || "(empty response)");
+      const finalText = cleanedText || "(empty response)";
+      if (placeholderMsgId) {
+        if (finalText.length <= 2000) { await editMessage(config.token, channelId, placeholderMsgId, finalText); }
+        else {
+          await discordApi(config.token, "DELETE", `/channels/${channelId}/messages/${placeholderMsgId}`).catch(() => {});
+          await sendMessage(config.token, channelId, finalText);
+        }
+      } else { await sendMessage(config.token, channelId, finalText); }
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -791,6 +860,52 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
           content: `Failed to list skills: ${err instanceof Error ? err.message : err}`,
         });
       }
+      return;
+    }
+
+    if (interaction.data.name === "cron") {
+      const { getCronScheduler } = await import("../cron-scheduler");
+      const scheduler = getCronScheduler();
+      if (!scheduler) {
+        await respondToInteraction(interaction, { content: "⏰ Cron scheduler not running." });
+        return;
+      }
+
+      const options = interaction.data.options ?? [];
+      const actionOpt = options.find((o: any) => o.name === "action");
+      const jobOpt = options.find((o: any) => o.name === "job");
+
+      if (actionOpt && jobOpt) {
+        const action = actionOpt.value as string;
+        const jobName = jobOpt.value as string;
+        const success = scheduler.setEnabled(jobName, action === "enable");
+        if (success) {
+          await respondToInteraction(interaction, {
+            content: `⏰ Job \`${jobName}\` ${action === "enable" ? "enabled ✅" : "disabled ⏸️"}`,
+          });
+        } else {
+          await respondToInteraction(interaction, {
+            content: `❌ Job \`${jobName}\` not found.`,
+          });
+        }
+        return;
+      }
+
+      // List all jobs
+      const statuses = scheduler.getStatus();
+      if (statuses.length === 0) {
+        await respondToInteraction(interaction, { content: "⏰ No cron jobs configured." });
+        return;
+      }
+
+      const lines = ["⏰ **Cron Jobs**", ""];
+      for (const s of statuses) {
+        const status = s.enabled !== false ? "✅" : "⏸️";
+        const next = s.enabled !== false ? ` → next: ${s.nextAt.toLocaleString()}` : "";
+        const target = s.target ? ` [${s.target}]` : "";
+        lines.push(`${status} **${s.name}** \`${s.cron}\`${target}${next}`);
+      }
+      await respondToInteraction(interaction, { content: lines.join("\n").slice(0, 2000) });
       return;
     }
 

@@ -17,6 +17,7 @@ import { getOAuthToken } from "./oauth-provider";
 import { homedir } from "os";
 import { ProgressReporter, type ProgressCallback } from "./progress-reporter";
 import { recordMetrics } from "./metrics";
+import { StreamHandler } from "./stream-handler";
 
 const LOGS_DIR = join(process.cwd(), ".claude/claudeclaw/logs");
 // Resolve prompts relative to the claudeclaw installation, not the project dir
@@ -36,6 +37,19 @@ const CLAUDECLAW_BLOCK_END = "<!-- claudeclaw:managed:end -->";
  */
 const COMPACT_WARN_THRESHOLD = 25;
 const COMPACT_TIMEOUT_ENABLED = true;
+
+/** Global stream chunk callback — set by platform handlers for streaming updates. */
+let globalStreamCallback: StreamChunkCallback | null = null;
+
+/** Register a stream chunk callback for real-time streaming. */
+export function onStreamChunk(callback: StreamChunkCallback): void {
+  globalStreamCallback = callback;
+}
+
+/** Clear the stream chunk callback. */
+export function clearStreamCallback(): void {
+  globalStreamCallback = null;
+}
 
 /** Global progress callback — set by platform handlers (Discord/Telegram) to receive progress updates. */
 let globalProgressCallback: ProgressCallback | null = null;
@@ -75,6 +89,9 @@ export interface RunResult {
   stderr: string;
   exitCode: number;
 }
+
+/** Callback invoked with each text chunk during streaming mode. */
+export type StreamChunkCallback = (chunk: string) => void;
 
 const RATE_LIMIT_PATTERN = /you.ve hit your limit|out of extra usage/i;
 
@@ -144,7 +161,8 @@ async function runClaudeOnce(
   api: string,
   baseEnv: Record<string, string>,
   timeoutMs: number = CLAUDE_TIMEOUT_MS,
-  progressCallback?: ProgressCallback | null
+  progressCallback?: ProgressCallback | null,
+  streamCallback?: StreamChunkCallback | null,
 ): Promise<{ rawStdout: string; stderr: string; exitCode: number }> {
   const args = [...baseArgs];
   const normalizedModel = model.trim().toLowerCase();
@@ -169,11 +187,12 @@ async function runClaudeOnce(
   });
 
   try {
-    // Read stdout in chunks to feed progress reporter
+    // Read stdout in chunks to feed progress reporter and streaming callback
     const stdoutChunks: string[] = [];
     const stdoutReader = async (): Promise<string> => {
       const reader = proc.stdout.getReader();
       const decoder = new TextDecoder();
+      let lineBuf = "";
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -181,8 +200,41 @@ async function runClaudeOnce(
           const text = decoder.decode(value, { stream: true });
           stdoutChunks.push(text);
           progressReporter?.feed(text);
+
+          // stream-json mode: parse NDJSON lines and extract text chunks
+          if (streamCallback) {
+            lineBuf += text;
+            const lines = lineBuf.split("\n");
+            lineBuf = lines.pop() ?? "";
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+              try {
+                const evt = JSON.parse(trimmed);
+                if (evt.type === "content_block_delta" && evt.delta?.text) {
+                  streamCallback(evt.delta.text);
+                }
+                if (evt.type === "assistant" && typeof evt.content === "string") {
+                  streamCallback(evt.content);
+                }
+              } catch {
+                // Not JSON — ignore
+              }
+            }
+          }
         }
       } finally {
+        if (streamCallback && lineBuf.trim()) {
+          try {
+            const evt = JSON.parse(lineBuf.trim());
+            if (evt.type === "content_block_delta" && evt.delta?.text) {
+              streamCallback(evt.delta.text);
+            }
+            if (evt.type === "assistant" && typeof evt.content === "string") {
+              streamCallback(evt.content);
+            }
+          } catch {}
+        }
         reader.releaseLock();
       }
       return stdoutChunks.join("");
@@ -481,9 +533,10 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
     `[${new Date().toLocaleTimeString()}] Running: ${name} (${isNew ? "new session" : `resume ${existing.sessionId.slice(0, 8)}`}, security: ${security.level})`
   );
 
-  // New session: use json output to capture Claude's session_id
-  // Resumed session: use text output with --resume
-  const outputFormat = isNew ? "json" : "text";
+  // Streaming: use stream-json for resumed sessions when enabled
+  const streamingEnabled = settings.streaming?.enabled === true;
+  const useStreaming = streamingEnabled && !isNew && globalStreamCallback;
+  const outputFormat = isNew ? "json" : (useStreaming ? "stream-json" : "text");
   const args = ["claude", "-p", prompt, "--output-format", outputFormat, ...securityArgs];
 
   if (!isNew) {
@@ -542,7 +595,7 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
     }
   }
 
-  let exec = await runClaudeOnce(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs, globalProgressCallback);
+  let exec = await runClaudeOnce(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs, globalProgressCallback, useStreaming ? globalStreamCallback : null);
   const primaryRateLimit = extractRateLimitMessage(exec.rawStdout, exec.stderr);
   let usedFallback = false;
 
@@ -617,6 +670,31 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
       }
     } catch (e) {
       console.error(`[${new Date().toLocaleTimeString()}] Failed to parse session from Claude output:`, e);
+    }
+  }
+
+  // For stream-json resumed sessions, extract text from NDJSON events
+  if (!rateLimitMessage && useStreaming && !isNew && exitCode === 0) {
+    const textParts: string[] = [];
+    for (const line of rawStdout.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        const evt = JSON.parse(trimmed);
+        if (evt.type === "content_block_delta" && evt.delta?.text) {
+          textParts.push(evt.delta.text);
+        }
+        if (evt.type === "assistant" && typeof evt.content === "string") {
+          textParts.push(evt.content);
+        }
+        if (evt.type === "result" && typeof evt.result === "string") {
+          textParts.length = 0;
+          textParts.push(evt.result);
+        }
+      } catch {}
+    }
+    if (textParts.length > 0) {
+      stdout = textParts.join("");
     }
   }
 

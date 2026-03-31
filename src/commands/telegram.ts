@@ -1,5 +1,6 @@
-import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession, onProgress, clearProgressCallback } from "../runner";
+import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession, onProgress, clearProgressCallback, onStreamChunk, clearStreamCallback } from "../runner";
 import { getSettings, loadSettings } from "../config";
+import { StreamHandler } from "../stream-handler";
 import { getQueueManager } from "../queue-manager";
 import { resetSession, peekSession } from "../sessions";
 import { readFile } from "node:fs/promises";
@@ -300,6 +301,29 @@ async function sendMessage(token: string, chatId: number, text: string, threadId
         ...(threadId ? { message_thread_id: threadId } : {}),
       });
     }
+  }
+}
+
+/** Send a message and return its message_id. */
+async function sendMessageGetId(token: string, chatId: number, text: string, threadId?: number): Promise<number> {
+  const result = await callApi<{ message_id: number }>(token, "sendMessage", {
+    chat_id: chatId, text: text.slice(0, 4096),
+    ...(threadId ? { message_thread_id: threadId } : {}),
+  });
+  return (result as any).message_id ?? 0;
+}
+
+/** Edit an existing message by message_id. */
+async function editMessageById(token: string, chatId: number, messageId: number, text: string): Promise<void> {
+  const html = markdownToTelegramHtml(normalizeTelegramText(text));
+  try {
+    await callApi(token, "editMessageText", {
+      chat_id: chatId, message_id: messageId, text: html.slice(0, 4096), parse_mode: "HTML",
+    });
+  } catch {
+    await callApi(token, "editMessageText", {
+      chat_id: chatId, message_id: messageId, text: text.slice(0, 4096),
+    }).catch(() => {});
   }
 }
 
@@ -732,13 +756,36 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
       sendMessage(config.token, chatId, update.message, threadId).catch(() => {});
     });
 
+    // Streaming mode setup
+    const streamingConfig = getSettings().streaming;
+    let streamHandler: StreamHandler | null = null;
+    let placeholderMsgId: number | null = null;
+
+    if (streamingConfig.enabled) {
+      placeholderMsgId = await sendMessageGetId(config.token, chatId, "⏳ 思考中...", threadId);
+      streamHandler = new StreamHandler({
+        updateIntervalMs: streamingConfig.updateIntervalMs,
+        minChunkChars: streamingConfig.minChunkChars,
+        onUpdate: (text) => {
+          if (placeholderMsgId) {
+            const truncated = text.length > 4096 ? text.slice(-4096) : text;
+            editMessageById(config.token, chatId, placeholderMsgId, truncated || "⏳ 思考中...").catch(() => {});
+          }
+        },
+      });
+      streamHandler.start();
+      onStreamChunk((chunk) => { streamHandler?.push(chunk); });
+    }
+
     const result = await qm.enqueue(queueId, () => runUserMessage("telegram", prefixedPrompt));
 
-    // Clear progress callback after completion
+    if (streamHandler) { await streamHandler.finish(); clearStreamCallback(); }
     clearProgressCallback();
 
     if (result.exitCode !== 0) {
-      await sendMessage(config.token, chatId, `Error (exit ${result.exitCode}): ${result.stderr || result.stdout || "Unknown error"}`, threadId);
+      const errText = `Error (exit ${result.exitCode}): ${result.stderr || result.stdout || "Unknown error"}`;
+      if (placeholderMsgId) { await editMessageById(config.token, chatId, placeholderMsgId, errText); }
+      else { await sendMessage(config.token, chatId, errText, threadId); }
     } else {
       const { cleanedText, reactionEmoji } = extractReactionDirective(result.stdout || "");
       if (reactionEmoji) {
@@ -746,7 +793,9 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
           console.error(`[Telegram] Failed to send reaction for ${label}: ${err instanceof Error ? err.message : err}`);
         });
       }
-      await sendMessage(config.token, chatId, cleanedText || "(empty response)", threadId);
+      const finalText = cleanedText || "(empty response)";
+      if (placeholderMsgId) { await editMessageById(config.token, chatId, placeholderMsgId, finalText); }
+      else { await sendMessage(config.token, chatId, finalText, threadId); }
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
