@@ -329,6 +329,32 @@ Model 檔案會在首次使用時自動從 HuggingFace 下載。
   </p>
 </details>
 
+## Testing
+
+執行所有測試：
+
+```bash
+bun test
+```
+
+### 測試覆蓋範圍
+
+| 模組 | 測試檔案 | 涵蓋內容 |
+|------|---------|---------|
+| `runner.ts` | `tests/runner.test.ts` | buildChildEnv、rate limit 偵測、security args、serial queue、timeout 格式 |
+| `config.ts` | `tests/config.test.ts` | resolvePrompt、parseSettings 預設值/空值/無效輸入、Discord snowflake 解析、exclude windows |
+| `sessions.ts` | `tests/sessions.test.ts` | session CRUD（create/peek/reset/backup）、turnCount 遞增、compactWarned 標記 |
+| `token-pool.ts` | `tests/token-pool.test.ts` | fallback-chain / round-robin / least-used 策略、rate limit 偵測 |
+| `intent-classifier.ts` | `tests/intent-classifier.test.ts` | hire/fire 指令解析、群組展開 |
+| `oauth-provider.ts` | `tests/oauth-provider.test.ts` | OAuth credentials 讀取、token 過期判斷 |
+| `context-monitor.ts` | `tests/context-monitor.test.ts` | context usage 計算、auto-compact 門檻 |
+| `logger.ts` | `tests/logger.test.ts` | 結構化 JSON log、level filtering |
+| `process-manager.ts` | `tests/process-manager.test.ts` | 子程序註冊/反註冊、graceful shutdown |
+| `settings-watcher.ts` | `tests/settings-watcher.test.ts` | 設定變更監聽、debounce |
+| `whisper.ts` | `tests/whisper.test.ts` | STT model URL/path、config 讀取 |
+
+所有測試使用 mock/spy，不會真的呼叫 Claude CLI。
+
 ## Screenshots
 
 ### Claude Code Folder-Based Status Bar
