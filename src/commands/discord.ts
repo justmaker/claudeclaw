@@ -8,6 +8,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { transcribeAudioToText } from "../whisper";
+import { synthesize, sendDiscordVoice, shouldSynthesizeVoice, parseVoiceCommand } from "../tts";
 import { resolveSkillPrompt, listSkillsWithMetadata, formatSkillsList } from "../skills";
 import { getMetricsSummary } from "../metrics";
 import { mkdir } from "node:fs/promises";
@@ -685,6 +686,19 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
           await sendMessage(config.token, channelId, finalText);
         }
       } else { await sendMessage(config.token, channelId, finalText); }
+
+      // ─── TTS 語音合成 ───
+      const isVoiceCmd = !!parseVoiceCommand(message.content);
+      const ttsConfig = getSettings().tts;
+      const { shouldSpeak, textToSpeak } = shouldSynthesizeVoice(finalText, ttsConfig, isVoiceCmd);
+      if (shouldSpeak && textToSpeak) {
+        try {
+          const ttsResult = await synthesize(textToSpeak, ttsConfig);
+          await sendDiscordVoice(config.token, channelId, ttsResult);
+        } catch (ttsErr) {
+          console.error(`[Discord] TTS 失敗: ${ttsErr instanceof Error ? ttsErr.message : ttsErr}`);
+        }
+      }
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);

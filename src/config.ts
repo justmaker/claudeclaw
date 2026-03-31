@@ -6,6 +6,7 @@ import { type TokenPoolEntry, type TokenStrategy, parseTokenPoolConfig, type Tok
 import type { CronJob } from "./cron-scheduler";
 import type { ProvidersConfig } from "./providers/types";
 import { type MCPConfig, parseMCPConfig } from "./mcp-client";
+import { type TtsConfig, DEFAULT_TTS_CONFIG, parseTtsConfig } from "./tts";
 
 const HEARTBEAT_DIR = join(process.cwd(), ".claude", "claudeclaw");
 const SETTINGS_FILE = join(HEARTBEAT_DIR, "settings.json");
@@ -73,6 +74,7 @@ const DEFAULT_SETTINGS: Settings = {
   cron: [],
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "", localModel: "large-v3", language: "", initialPrompt: "" },
+  tts: { ...DEFAULT_TTS_CONFIG },
   workspace: { path: "" },
   providers: {},
   mcp: {},
@@ -153,6 +155,7 @@ export interface Settings {
   security: SecurityConfig;
   web: WebConfig;
   stt: SttConfig;
+  tts: TtsConfig;
   workspace: WorkspaceConfig;
   providers: ProvidersConfig;
   mcp: MCPConfig;
@@ -415,6 +418,7 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
       language: typeof raw.stt?.language === "string" ? raw.stt.language.trim() : "",
       initialPrompt: typeof raw.stt?.initialPrompt === "string" ? raw.stt.initialPrompt.trim() : "",
     },
+    tts: parseTtsConfig(raw.tts as Record<string, unknown> | undefined),
     workspace: {
       path: typeof raw.workspace?.path === "string" ? raw.workspace.path.trim() : "",
     },

@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { transcribeAudioToText } from "../whisper";
+import { synthesize, sendTelegramVoice, shouldSynthesizeVoice, parseVoiceCommand } from "../tts";
 import { resolveSkillPrompt, listSkills, listSkillsWithMetadata, formatSkillsList } from "../skills";
 import { mkdir } from "node:fs/promises";
 import { extname, join } from "node:path";
@@ -803,6 +804,19 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
       const finalText = cleanedText || "(empty response)";
       if (placeholderMsgId) { await editMessageById(config.token, chatId, placeholderMsgId, finalText); }
       else { await sendMessage(config.token, chatId, finalText, threadId); }
+
+      // ─── TTS 語音合成 ───
+      const isVoiceCmd = !!parseVoiceCommand(text ?? "");
+      const ttsConfig = getSettings().tts;
+      const { shouldSpeak, textToSpeak } = shouldSynthesizeVoice(finalText, ttsConfig, isVoiceCmd);
+      if (shouldSpeak && textToSpeak) {
+        try {
+          const ttsResult = await synthesize(textToSpeak, ttsConfig, { format: "ogg" });
+          await sendTelegramVoice(config.token, chatId, ttsResult, threadId);
+        } catch (ttsErr) {
+          console.error(`[Telegram] TTS 失敗: ${ttsErr instanceof Error ? ttsErr.message : ttsErr}`);
+        }
+      }
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
