@@ -337,6 +337,8 @@ export async function start(args: string[] = []) {
     const { shutdownAll } = await import("../process-manager");
     const { getMCPManager } = await import("../mcp-client");
     await getMCPManager().disconnectAll();
+    const { shutdownAllSubagents } = await import("../subagent");
+    await shutdownAllSubagents();
     const result = await shutdownAll(5000);
     if (result.terminated.length > 0)
       console.log(`Gracefully terminated: ${result.terminated.join(", ")}`);

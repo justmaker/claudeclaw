@@ -285,6 +285,19 @@ ClaudeClaw 內建 MCP client，可直接連接任何 MCP server（透過 stdio t
 - 非 Claude model（OpenAI/Google 等）可直接使用 MCP tools
 - Claude CLI 模式仍使用自己的 MCP integration（不受影響）
 - 使用 `/mcp` 指令查看已連線 server 及可用 tools
+### Subagent 系統
+
+讓主 agent spawn 獨立的 Claude CLI 子 agent，真正並行處理任務。
+
+- `spawnSubagent()` — 啟動獨立子 agent
+- `listSubagents()` / `killSubagent(id)` / `steerSubagent(id, msg)` — 管理介面
+- Discord `/subagents` slash command
+- `[spawn:label]prompt[/spawn]` 語法觸發
+- IPC：result 檔案 `~/.claude/claudeclaw/subagents/{id}.result.json` + file watcher
+
+```json
+{ "subagents": { "maxConcurrent": 5, "defaultModel": "sonnet", "timeoutMs": 600000 } }
+```
 
 ### Multi-Provider 支援
 

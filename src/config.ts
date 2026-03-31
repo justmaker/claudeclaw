@@ -78,6 +78,11 @@ const DEFAULT_SETTINGS: Settings = {
   workspace: { path: "" },
   providers: {},
   mcp: {},
+  subagents: {
+    maxConcurrent: 5,
+    defaultModel: "sonnet",
+    timeoutMs: 600000,
+  },
   maxConcurrent: 3,
   streaming: {
     enabled: false,
@@ -159,6 +164,7 @@ export interface Settings {
   workspace: WorkspaceConfig;
   providers: ProvidersConfig;
   mcp: MCPConfig;
+  subagents: SubagentConfig;
   maxConcurrent: number;
   streaming: StreamingConfig;
 }
@@ -188,6 +194,12 @@ export interface WebConfig {
   enabled: boolean;
   host: string;
   port: number;
+}
+
+export interface SubagentConfig {
+  maxConcurrent: number;
+  defaultModel: string;
+  timeoutMs: number;
 }
 
 export interface StreamingConfig {
@@ -424,6 +436,11 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
     },
     providers: parseProvidersConfig(raw.providers),
     mcp: parseMCPConfig(raw.mcp),
+    subagents: {
+      maxConcurrent: typeof raw.subagents?.maxConcurrent === "number" ? raw.subagents.maxConcurrent : 5,
+      defaultModel: typeof raw.subagents?.defaultModel === "string" ? raw.subagents.defaultModel : "sonnet",
+      timeoutMs: typeof raw.subagents?.timeoutMs === "number" ? raw.subagents.timeoutMs : 600000,
+    },
     maxConcurrent: typeof raw.maxConcurrent === "number" && raw.maxConcurrent >= 1 ? raw.maxConcurrent : 3,
     streaming: {
       enabled: raw.streaming?.enabled === true,
