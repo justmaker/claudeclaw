@@ -4,6 +4,7 @@ import { existsSync } from "fs";
 import { normalizeTimezoneName, resolveTimezoneOffsetMinutes } from "./timezone";
 import { type TokenPoolEntry, type TokenStrategy, parseTokenPoolConfig, type TokenPoolConfig } from "./token-pool";
 import type { CronJob } from "./cron-scheduler";
+import type { ProvidersConfig } from "./providers/types";
 
 const HEARTBEAT_DIR = join(process.cwd(), ".claude", "claudeclaw");
 const SETTINGS_FILE = join(HEARTBEAT_DIR, "settings.json");

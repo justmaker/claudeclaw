@@ -117,6 +117,7 @@ Setup wizard 會引導你設定 model、heartbeat、Telegram、Discord 等，完
   "tokenStrategy": "fallback-chain",    // "fallback-chain" | "round-robin" | "least-used"
 
   // ─── Multi-Provider（OpenAI / Anthropic / Google / Bedrock / Ollama 等）───
+  // ─── Multi-Provider ───
   "providers": {
     "openai": { "apiKey": "sk-..." },
     "anthropic": { "apiKey": "sk-ant-..." },
