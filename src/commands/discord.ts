@@ -583,6 +583,13 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
       }
     }
 
+    // /mcp command
+    if (cleanContent.trim().toLowerCase() === "/mcp") {
+      const { formatMCPStatus } = await import("../mcp-client");
+      await sendMessage(config.token, channelId, formatMCPStatus());
+      return;
+    }
+
     // Skill routing: detect slash commands and resolve to SKILL.md prompts
     const command = cleanContent.startsWith("/") ? cleanContent.trim().split(/\s+/, 1)[0].toLowerCase() : null;
     let skillContext: string | null = null;

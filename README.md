@@ -198,6 +198,22 @@ Setup wizard 會引導你設定 model、heartbeat、Telegram、Discord 等，完
   // ─── 並行處理 ───
   "maxConcurrent": 3,                   // 最大同時處理訊息數
 
+  // ─── MCP（Model Context Protocol）───
+  "mcp": {
+    "servers": {
+      "mcp-sauron": {
+        "command": "npx",
+        "args": ["-y", "efficient-gitlab-mcp-server"],
+        "env": { "GITLAB_PERSONAL_ACCESS_TOKEN": "glpat-xxx" }
+      },
+      "mcp-atlassian": {
+        "command": "uvx",
+        "args": ["mcp-atlassian"],
+        "env": { "CONFLUENCE_URL": "https://confluence.example.com" }
+      }
+    }
+  },
+
   // ─── Agentic Mode（實驗性）───
   "agentic": {
     "enabled": false,
@@ -257,6 +273,16 @@ Setup wizard 會引導你設定 model、heartbeat、Telegram、Discord 等，完
 ---
 
 ## Features
+
+### MCP（Model Context Protocol）原生支援
+
+ClaudeClaw 內建 MCP client，可直接連接任何 MCP server（透過 stdio transport），不依賴 Claude Code CLI。
+
+- 在 `settings.json` 的 `mcp.servers` 中設定 server
+- 啟動時自動連線所有已設定的 MCP server
+- 非 Claude model（OpenAI/Google 等）可直接使用 MCP tools
+- Claude CLI 模式仍使用自己的 MCP integration（不受影響）
+- 使用 `/mcp` 指令查看已連線 server 及可用 tools
 
 ### Multi-Provider 支援
 

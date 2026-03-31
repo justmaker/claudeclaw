@@ -5,6 +5,7 @@ import { normalizeTimezoneName, resolveTimezoneOffsetMinutes } from "./timezone"
 import { type TokenPoolEntry, type TokenStrategy, parseTokenPoolConfig, type TokenPoolConfig } from "./token-pool";
 import type { CronJob } from "./cron-scheduler";
 import type { ProvidersConfig } from "./providers/types";
+import { type MCPConfig, parseMCPConfig } from "./mcp-client";
 
 const HEARTBEAT_DIR = join(process.cwd(), ".claude", "claudeclaw");
 const SETTINGS_FILE = join(HEARTBEAT_DIR, "settings.json");
@@ -74,6 +75,7 @@ const DEFAULT_SETTINGS: Settings = {
   stt: { baseUrl: "", model: "", localModel: "large-v3", language: "", initialPrompt: "" },
   workspace: { path: "" },
   providers: {},
+  mcp: {},
   maxConcurrent: 3,
   streaming: {
     enabled: false,
@@ -153,6 +155,7 @@ export interface Settings {
   stt: SttConfig;
   workspace: WorkspaceConfig;
   providers: ProvidersConfig;
+  mcp: MCPConfig;
   maxConcurrent: number;
   streaming: StreamingConfig;
 }
@@ -416,6 +419,7 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
       path: typeof raw.workspace?.path === "string" ? raw.workspace.path.trim() : "",
     },
     providers: parseProvidersConfig(raw.providers),
+    mcp: parseMCPConfig(raw.mcp),
     maxConcurrent: typeof raw.maxConcurrent === "number" && raw.maxConcurrent >= 1 ? raw.maxConcurrent : 3,
     streaming: {
       enabled: raw.streaming?.enabled === true,

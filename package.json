@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "discord.js": "^14.25.1",
-    "ogg-opus-decoder": "^1.7.3"
+    "ogg-opus-decoder": "^1.7.3",
+    "@modelcontextprotocol/sdk": "^1.29.0"
   }
 }

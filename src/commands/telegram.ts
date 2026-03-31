@@ -709,6 +709,13 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
       }
     }
 
+    // /mcp command
+    if (command === "/mcp") {
+      const { formatMCPStatus } = await import("../mcp-client");
+      await sendMessage(config.token, chatId, formatMCPStatus(), threadId);
+      return;
+    }
+
     // Skill routing: resolve slash commands to SKILL.md prompts
     let skillContext: string | null = null;
     if (command && command !== "/start" && command !== "/reset" && command !== "/compact" && command !== "/status" && command !== "/context") {

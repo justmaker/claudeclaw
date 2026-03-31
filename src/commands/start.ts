@@ -318,12 +318,25 @@ export async function start(args: string[] = []) {
   const webPort = webPortFlag ?? settings.web.port;
 
   await setupStatusline();
+
+  // MCP servers 初始化
+  if (settings.mcp?.servers && Object.keys(settings.mcp.servers).length > 0) {
+    const { initMCPServers } = await import("../mcp-client");
+    const mcpResult = await initMCPServers(settings.mcp);
+    if (mcpResult.connected.length > 0)
+      console.log(`[MCP] Connected: ${mcpResult.connected.join(", ")}`);
+    for (const err of mcpResult.errors)
+      console.error(`[MCP] Failed to connect ${err.name}: ${err.error}`);
+  }
+
   await writePidFile();
   let web: WebServerHandle | null = null;
   let discordStopGateway: (() => void) | null = null;
 
   async function shutdown() {
     const { shutdownAll } = await import("../process-manager");
+    const { getMCPManager } = await import("../mcp-client");
+    await getMCPManager().disconnectAll();
     const result = await shutdownAll(5000);
     if (result.terminated.length > 0)
       console.log(`Gracefully terminated: ${result.terminated.join(", ")}`);
