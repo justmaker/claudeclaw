@@ -330,6 +330,8 @@ export async function start(args: string[] = []) {
     if (result.killed.length > 0)
       console.log(`Force killed: ${result.killed.join(", ")}`);
     if (discordStopGateway) discordStopGateway();
+    if (slackStopFn) slackStopFn();
+    if (whatsappStopFn) whatsappStopFn();
     if (web) web.stop();
     await teardownStatusline();
     await cleanupPidFile();
@@ -422,6 +424,38 @@ export async function start(args: string[] = []) {
 
   await initSignal(currentSettings);
   if (!signalEnabled) console.log("  Signal: not configured");
+
+  // --- Slack ---
+  let slackEnabled = false;
+  let slackStopFn: (() => void) | null = null;
+  async function initSlack(settings: Settings) {
+    if (settings.slack.enabled && settings.slack.botToken && !slackEnabled) {
+      const { startPolling, stopSlack } = await import("./slack");
+      startPolling(debugFlag); slackStopFn = stopSlack; slackEnabled = true;
+      console.log(`[${ts()}] Slack: enabled`);
+    } else if (!settings.slack.enabled && slackEnabled) {
+      if (slackStopFn) slackStopFn(); slackStopFn = null; slackEnabled = false;
+      console.log(`[${ts()}] Slack: disabled`);
+    }
+  }
+  await initSlack(currentSettings);
+  if (!slackEnabled) console.log("  Slack: not configured");
+
+  // --- WhatsApp ---
+  let whatsappEnabled = false;
+  let whatsappStopFn: (() => void) | null = null;
+  async function initWhatsApp(settings: Settings) {
+    if (settings.whatsapp.enabled && !whatsappEnabled) {
+      const { startPolling, stopWhatsApp } = await import("./whatsapp");
+      startPolling(debugFlag); whatsappStopFn = stopWhatsApp; whatsappEnabled = true;
+      console.log(`[${ts()}] WhatsApp: enabled`);
+    } else if (!settings.whatsapp.enabled && whatsappEnabled) {
+      if (whatsappStopFn) whatsappStopFn(); whatsappStopFn = null; whatsappEnabled = false;
+      console.log(`[${ts()}] WhatsApp: disabled`);
+    }
+  }
+  await initWhatsApp(currentSettings);
+  if (!whatsappEnabled) console.log("  WhatsApp: not configured");
 
   function isAddrInUse(err: unknown): boolean {
     if (!err || typeof err !== "object") return false;
@@ -765,6 +799,8 @@ export async function start(args: string[] = []) {
 
       // Signal changes
       await initSignal(newSettings);
+      await initSlack(newSettings);
+      await initWhatsApp(newSettings);
     } catch (err) {
       console.error(`[${ts()}] Hot-reload error:`, err);
     }

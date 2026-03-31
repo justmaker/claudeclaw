@@ -68,6 +68,8 @@ const DEFAULT_SETTINGS: Settings = {
   telegram: { token: "", allowedUserIds: [] },
   discord: { token: "", allowedUserIds: [], listenChannels: [] },
   signal: { enabled: false, phone: "", apiUrl: "http://localhost:8080", allowedNumbers: [] },
+  slack: { enabled: false, botToken: "", appToken: "", signingSecret: "", allowedUsers: [], listenChannels: [] },
+  whatsapp: { enabled: false, allowedNumbers: [], sessionPath: "~/.claude/claudeclaw/whatsapp-session" },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   cron: [],
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
@@ -105,6 +107,21 @@ export interface DiscordConfig {
   token: string;
   allowedUserIds: string[]; // Discord snowflake IDs exceed Number.MAX_SAFE_INTEGER
   listenChannels: string[]; // Channel IDs where bot responds to all messages (no mention needed)
+}
+
+export interface SlackConfig {
+  enabled: boolean;
+  botToken: string;
+  appToken: string;
+  signingSecret: string;
+  allowedUsers: string[];
+  listenChannels: string[];
+}
+
+export interface WhatsAppConfig {
+  enabled: boolean;
+  allowedNumbers: string[];
+  sessionPath: string;
 }
 
 export interface SignalConfig {
@@ -148,6 +165,8 @@ export interface Settings {
   telegram: TelegramConfig;
   discord: DiscordConfig;
   signal: SignalConfig;
+  slack: SlackConfig;
+  whatsapp: WhatsAppConfig;
   security: SecurityConfig;
   web: WebConfig;
   stt: SttConfig;
@@ -390,6 +409,19 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
       allowedNumbers: Array.isArray(raw.signal?.allowedNumbers)
         ? raw.signal.allowedNumbers.map(String)
         : [],
+    },
+    slack: {
+      enabled: raw.slack?.enabled ?? false,
+      botToken: typeof raw.slack?.botToken === "string" ? raw.slack.botToken.trim() : "",
+      appToken: typeof raw.slack?.appToken === "string" ? raw.slack.appToken.trim() : "",
+      signingSecret: typeof raw.slack?.signingSecret === "string" ? raw.slack.signingSecret.trim() : "",
+      allowedUsers: Array.isArray(raw.slack?.allowedUsers) ? raw.slack.allowedUsers.map(String) : [],
+      listenChannels: Array.isArray(raw.slack?.listenChannels) ? raw.slack.listenChannels.map(String) : [],
+    },
+    whatsapp: {
+      enabled: raw.whatsapp?.enabled ?? false,
+      allowedNumbers: Array.isArray(raw.whatsapp?.allowedNumbers) ? raw.whatsapp.allowedNumbers.map(String) : [],
+      sessionPath: typeof raw.whatsapp?.sessionPath === "string" ? raw.whatsapp.sessionPath.trim() : "~/.claude/claudeclaw/whatsapp-session",
     },
     security: {
       level,

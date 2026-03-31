@@ -23,7 +23,7 @@
 
 <p align="center"><b>A lightweight, open-source OpenClaw alternative built on Claude Code.</b></p>
 
-ClaudeClaw 把你的 Claude Code 變成一個永不停歇的個人助理。它以背景 daemon 運行，支援排程任務、Telegram / Discord / Signal 訊息互動、語音辨識、多帳號輪轉，以及各種自動化整合。
+ClaudeClaw 把你的 Claude Code 變成一個永不停歇的個人助理。它以背景 daemon 運行，支援排程任務、Telegram / Discord / Signal / Slack / WhatsApp 訊息互動、語音辨識、多帳號輪轉，以及各種自動化整合。
 
 > ⚠️ 請勿將 ClaudeClaw 用於任何非法活動。
 
@@ -167,6 +167,23 @@ Setup wizard 會引導你設定 model、heartbeat、Telegram、Discord 等，完
     "allowedNumbers": ["+886912345678"]
   },
 
+  // ─── Slack ───
+  "slack": {
+    "enabled": false,
+    "botToken": "xoxb-...",
+    "appToken": "xapp-...",
+    "signingSecret": "...",
+    "allowedUsers": ["U123456"],
+    "listenChannels": ["C123456"]
+  },
+
+  // ─── WhatsApp ───
+  "whatsapp": {
+    "enabled": false,
+    "allowedNumbers": ["+886912345678"],
+    "sessionPath": "~/.claude/claudeclaw/whatsapp-session"
+  },
+
   // ─── 安全 ───
   "security": {
     "level": "moderate",                // "locked" | "strict" | "moderate" | "unrestricted"
@@ -246,6 +263,15 @@ Setup wizard 會引導你設定 model、heartbeat、Telegram、Discord 等，完
 | `signal.phone` | string | `""` | 註冊在 signal-cli 的手機號碼 |
 | `signal.apiUrl` | string | `"http://localhost:8080"` | signal-cli-rest-api 的 URL |
 | `signal.allowedNumbers` | string[] | `[]` | 允許的 Signal 手機號碼 |
+| `slack.enabled` | boolean | `false` | 啟用 Slack channel |
+| `slack.botToken` | string | `""` | Slack Bot Token |
+| `slack.appToken` | string | `""` | Slack App Token |
+| `slack.signingSecret` | string | `""` | Slack Signing Secret |
+| `slack.allowedUsers` | string[] | `[]` | 允許的 Slack User ID |
+| `slack.listenChannels` | string[] | `[]` | 監聽的 Slack Channel ID |
+| `whatsapp.enabled` | boolean | `false` | 啟用 WhatsApp channel |
+| `whatsapp.allowedNumbers` | string[] | `[]` | 允許的手機號碼 |
+| `whatsapp.sessionPath` | string | `"~/.claude/claudeclaw/whatsapp-session"` | Session 儲存路徑 |
 | `security.level` | string | `"moderate"` | 安全等級 |
 | `web.enabled` | boolean | `false` | 啟用 Web Dashboard |
 | `web.host` | string | `"127.0.0.1"` | Dashboard 綁定位址 |
@@ -441,6 +467,17 @@ curl -X GET 'http://localhost:8080/v1/qrcodelink?device_name=claudeclaw' --outpu
 ```
 
 啟動 daemon 後，Signal 會自動開始 polling 接收訊息。支援文字、圖片、語音（自動 Whisper 轉文字）。
+
+### Slack 設定
+
+使用 [Slack Bolt SDK](https://slack.dev/bolt-js/) Socket Mode。設定 `slack.enabled: true` 及 Token 後即可使用。
+支援：文字、圖片、語音（Whisper）、Thread Reply、Reaction。
+
+### WhatsApp 設定
+
+使用 [Baileys](https://github.com/WhiskeySockets/Baileys)。首次啟動顯示 QR Code，掃描連結手機。
+支援：文字、圖片、語音（Whisper）、文件、Reaction。
+
 ### Cron Scheduler
 
 通用 cron 排程系統，支援 cron expression 定時執行 prompt，獨立於 heartbeat 運作。
