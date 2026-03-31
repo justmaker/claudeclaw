@@ -69,6 +69,7 @@ const DEFAULT_SETTINGS: Settings = {
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "", localModel: "large-v3", language: "", initialPrompt: "" },
   workspace: { path: "" },
+  maxConcurrent: 3,
 };
 
 export interface HeartbeatExcludeWindow {
@@ -132,6 +133,7 @@ export interface Settings {
   web: WebConfig;
   stt: SttConfig;
   workspace: WorkspaceConfig;
+  maxConcurrent: number;
 }
 
 export type { TokenPoolEntry, TokenStrategy, TokenPoolConfig };
@@ -338,6 +340,7 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
     workspace: {
       path: typeof raw.workspace?.path === "string" ? raw.workspace.path.trim() : "",
     },
+    maxConcurrent: typeof raw.maxConcurrent === "number" && raw.maxConcurrent >= 1 ? raw.maxConcurrent : 3,
   };
 }
 

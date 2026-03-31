@@ -248,6 +248,20 @@ ClaudeClaw 支援使用 Claude CLI 的 OAuth token 呼叫 Anthropic API，省去
 > 這可能違反 Anthropic 的服務條款（Terms of Service）。使用此功能的風險由使用者自行承擔。
 > Anthropic 可能隨時變更認證機制，導致此功能失效。
 
+## 並行處理設定
+
+ClaudeClaw 預設最多同時處理 3 個訊息（跨不同 thread/channel）。同一 thread 內的訊息仍按順序處理。
+
+在 `settings.json` 設定 `maxConcurrent`：
+
+```json
+{
+  "maxConcurrent": 3
+}
+```
+
+調高可加速多 thread 回應，但會增加 API 並行負載。
+
 ## STT / 語音辨識設定
 
 ClaudeClaw 支援語音訊息轉文字，可透過本機 whisper.cpp 或遠端 API 兩種模式。

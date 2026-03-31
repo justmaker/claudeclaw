@@ -583,7 +583,16 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
     const threadId = knownThreads.has(channelId) ? channelId : undefined;
     const queueId = threadId || channelId;
     const qm = getQueueManager(getSettings().maxConcurrent);
+
+    // Set up progress callback for long-running tasks
+    onProgress((update) => {
+      sendMessage(config.token, channelId, update.message).catch(() => {});
+    });
+
     const result = await qm.enqueue(queueId, () => runUserMessage("discord", prefixedPrompt, threadId));
+
+    // Clear progress callback after completion
+    clearProgressCallback();
 
     if (result.exitCode !== 0) {
       await sendMessage(config.token, channelId, `Error (exit ${result.exitCode}): ${result.stderr || result.stdout || "Unknown error"}`);

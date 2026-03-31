@@ -1,5 +1,6 @@
-import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession } from "../runner";
+import { ensureProjectClaudeMd, run, runUserMessage, compactCurrentSession, onProgress, clearProgressCallback } from "../runner";
 import { getSettings, loadSettings } from "../config";
+import { getQueueManager } from "../queue-manager";
 import { resetSession, peekSession } from "../sessions";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -712,7 +713,18 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
       );
     }
     const prefixedPrompt = promptParts.join("\n");
-    const result = await runUserMessage("telegram", prefixedPrompt);
+    const queueId = threadId ? `${chatId}:${threadId}` : String(chatId);
+    const qm = getQueueManager(getSettings().maxConcurrent);
+
+    // Set up progress callback for long-running tasks
+    onProgress((update) => {
+      sendMessage(config.token, chatId, update.message, threadId).catch(() => {});
+    });
+
+    const result = await qm.enqueue(queueId, () => runUserMessage("telegram", prefixedPrompt));
+
+    // Clear progress callback after completion
+    clearProgressCallback();
 
     if (result.exitCode !== 0) {
       await sendMessage(config.token, chatId, `Error (exit ${result.exitCode}): ${result.stderr || result.stdout || "Unknown error"}`, threadId);
