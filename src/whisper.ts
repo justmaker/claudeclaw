@@ -4,8 +4,16 @@ import { statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSettings } from "./config";
+import type { SttConfig } from "./config";
 
-const WHISPER_MODEL = "base.en";
+function getSttConfig(): SttConfig {
+  return getSettings().stt;
+}
+
+function getLocalModel(): string {
+  return getSttConfig().localModel || "large-v3";
+}
+
 const WHISPER_ROOT = join(process.cwd(), ".claude", "claudeclaw", "whisper");
 const BIN_DIR = join(WHISPER_ROOT, "bin");
 const LIB_DIR = join(WHISPER_ROOT, "lib");
@@ -14,7 +22,9 @@ const TMP_FOLDER = join(WHISPER_ROOT, "tmp");
 const OGG_MJS_CONVERTER = fileURLToPath(new URL("./ogg.mjs", import.meta.url));
 const PLUGIN_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-const MODEL_URL = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${WHISPER_MODEL}.bin`;
+export function getModelUrl(model: string): string {
+  return `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-${model}.bin`;
+}
 
 interface BinarySource {
   url: string;
@@ -59,8 +69,9 @@ function getWhisperBinaryPath(): string {
   return join(BIN_DIR, `whisper-cli${suffix}`);
 }
 
-function getModelPath(): string {
-  return join(MODEL_FOLDER, `ggml-${WHISPER_MODEL}.bin`);
+export function getModelPath(model?: string): string {
+  const m = model || getLocalModel();
+  return join(MODEL_FOLDER, `ggml-${m}.bin`);
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -207,7 +218,7 @@ async function downloadAndExtractBinary(): Promise<void> {
     if (!entry.isFile()) continue;
     const name = entry.name;
     if (name.includes("whisper") && (name.endsWith(".so") || name.endsWith(".dylib") || name.match(/\.so\.\d/))) {
-      const parentPath = entry.parentPath ?? entry.path ?? "";
+      const parentPath = entry.parentPath ?? "";
       const srcPath = join(parentPath, name);
       const destPath = join(LIB_DIR, name);
       await Bun.write(destPath, Bun.file(srcPath));
@@ -221,18 +232,20 @@ async function downloadAndExtractBinary(): Promise<void> {
 }
 
 async function downloadModel(): Promise<void> {
-  const modelPath = getModelPath();
+  const model = getLocalModel();
+  const modelPath = getModelPath(model);
   if (await fileExists(modelPath)) return;
 
   await mkdir(MODEL_FOLDER, { recursive: true });
-  console.log(`whisper: downloading model ${WHISPER_MODEL}...`);
-  await downloadFile(MODEL_URL, modelPath);
+  console.log(`whisper: downloading model ${model}...`);
+  await downloadFile(getModelUrl(model), modelPath);
   console.log("whisper: model ready");
 }
 
 async function prepareWhisperAssets(printOutput: boolean): Promise<void> {
   const startedAt = Date.now();
-  console.log(`whisper warmup: start root=${WHISPER_ROOT} model=${WHISPER_MODEL}`);
+  const model = getLocalModel();
+  console.log(`whisper warmup: start root=${WHISPER_ROOT} model=${model}`);
   await mkdir(WHISPER_ROOT, { recursive: true });
   await mkdir(TMP_FOLDER, { recursive: true });
 
@@ -331,6 +344,10 @@ async function transcribeViaApi(
   form.append("file", new Blob([audioBytes], { type: mimeType }), `audio.${ext}`);
   form.append("model", apiModel);
 
+  const sttConfig = getSttConfig();
+  if (sttConfig.language) form.append("language", sttConfig.language);
+  if (sttConfig.initialPrompt) form.append("prompt", sttConfig.initialPrompt);
+
   const response = await fetch(url, { method: "POST", body: form });
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -370,8 +387,13 @@ export async function transcribeAudioToText(
   const modelPath = getModelPath();
 
   const runTranscription = () => {
+    const sttConfig = getSttConfig();
+    const args = [binaryPath, "-m", modelPath, "-f", wavPath, "--no-timestamps"];
+    if (sttConfig.language) args.push("--language", sttConfig.language);
+    if (sttConfig.initialPrompt) args.push("--initial-prompt", sttConfig.initialPrompt);
+
     const proc = Bun.spawnSync(
-      [binaryPath, "-m", modelPath, "-f", wavPath, "--no-timestamps"],
+      args,
       {
         stdout: "pipe",
         stderr: "pipe",

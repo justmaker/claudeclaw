@@ -142,6 +142,39 @@ logger.info("Bot started");
 logger.error("Connection failed", { error: "timeout", retry: 3 });
 ```
 
+## STT / 語音辨識設定
+
+ClaudeClaw 支援語音訊息轉文字，可透過本機 whisper.cpp 或遠端 API 兩種模式。
+
+在 `settings.json` 的 `stt` 欄位設定：
+
+```json
+{
+  "stt": {
+    "baseUrl": "",
+    "model": "",
+    "localModel": "large-v3",
+    "language": "zh",
+    "initialPrompt": "以下是繁體中文的語音內容。QVS QPKG QNAP..."
+  }
+}
+```
+
+| 欄位 | 說明 | 預設值 |
+|------|------|--------|
+| `baseUrl` | OpenAI 相容 STT API 的 URL。有值時走 API 模式，空值走本機 whisper.cpp | `""` |
+| `model` | API 模式使用的 model 名稱 | `"Systran/faster-whisper-large-v3"` |
+| `localModel` | 本機 whisper.cpp 使用的 model 名稱 | `"large-v3"` |
+| `language` | 語言代碼（如 `zh`、`en`、`ja`），同時適用 API 和本機模式 | `""` |
+| `initialPrompt` | 提示詞，幫助模型理解領域術語，提升辨識準確度 | `""` |
+
+**中文使用者建議設定：**
+- `localModel`: `"large-v3"`（預設值已適用，避免使用 `base.en`）
+- `language`: `"zh"`
+- `initialPrompt`: 加入常用專有名詞提升準確度
+
+Model 檔案會在首次使用時自動從 HuggingFace 下載。
+
 ## FAQ
 
 <details open>

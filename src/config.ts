@@ -2,6 +2,7 @@ import { join, isAbsolute } from "path";
 import { mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import { normalizeTimezoneName, resolveTimezoneOffsetMinutes } from "./timezone";
+import { type TokenPoolEntry, type TokenStrategy, parseTokenPoolConfig, type TokenPoolConfig } from "./token-pool";
 
 const HEARTBEAT_DIR = join(process.cwd(), ".claude", "claudeclaw");
 const SETTINGS_FILE = join(HEARTBEAT_DIR, "settings.json");
@@ -15,6 +16,8 @@ const DEFAULT_SETTINGS: Settings = {
     model: "",
     api: "",
   },
+  tokenPool: [],
+  tokenStrategy: "fallback-chain" as TokenStrategy,
   agentic: {
     enabled: false,
     defaultMode: "implementation",
@@ -60,7 +63,7 @@ const DEFAULT_SETTINGS: Settings = {
   discord: { token: "", allowedUserIds: [], listenChannels: [] },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
-  stt: { baseUrl: "", model: "" },
+  stt: { baseUrl: "", model: "", localModel: "large-v3", language: "", initialPrompt: "" },
   workspace: { path: "" },
 };
 
@@ -105,6 +108,8 @@ export interface Settings {
   model: string;
   api: string;
   fallback: ModelConfig;
+  tokenPool: TokenPoolEntry[];
+  tokenStrategy: TokenStrategy;
   agentic: AgenticConfig;
   timezone: string;
   timezoneOffsetMinutes: number;
@@ -116,6 +121,8 @@ export interface Settings {
   stt: SttConfig;
   workspace: WorkspaceConfig;
 }
+
+export type { TokenPoolEntry, TokenStrategy, TokenPoolConfig };
 
 export interface AgenticMode {
   name: string;
@@ -157,6 +164,12 @@ export interface SttConfig {
   baseUrl: string;
   /** Model name passed to the API (default: "Systran/faster-whisper-large-v3") */
   model: string;
+  /** Local whisper.cpp model name (default: "large-v3"). Used when baseUrl is empty. */
+  localModel: string;
+  /** Language code for transcription, e.g. "zh", "en", "ja". Passed to both API and local modes. */
+  language: string;
+  /** Initial prompt / context hint for better transcription accuracy. */
+  initialPrompt: string;
 }
 
 let cached: Settings | null = null;
@@ -228,7 +241,7 @@ function parseAgenticConfig(raw: any): AgenticConfig {
   };
 }
 
-function parseSettings(raw: Record<string, any>): Settings {
+function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string[]): Settings {
   const rawLevel = raw.security?.level;
   const level: SecurityLevel =
     typeof rawLevel === "string" && VALID_LEVELS.has(rawLevel as SecurityLevel)
@@ -244,6 +257,14 @@ function parseSettings(raw: Record<string, any>): Settings {
       model: typeof raw.fallback?.model === "string" ? raw.fallback.model.trim() : "",
       api: typeof raw.fallback?.api === "string" ? raw.fallback.api.trim() : "",
     },
+    tokenPool: (() => {
+      const parsed = parseTokenPoolConfig(raw);
+      return parsed ? parsed.pool : [];
+    })(),
+    tokenStrategy: (() => {
+      const parsed = parseTokenPoolConfig(raw);
+      return parsed ? parsed.strategy : "fallback-chain" as TokenStrategy;
+    })(),
     agentic: parseAgenticConfig(raw.agentic),
     timezone: parsedTimezone,
     timezoneOffsetMinutes: parseTimezoneOffsetMinutes(raw.timezoneOffsetMinutes, parsedTimezone),
@@ -260,9 +281,11 @@ function parseSettings(raw: Record<string, any>): Settings {
     },
     discord: {
       token: typeof raw.discord?.token === "string" ? raw.discord.token.trim() : "",
-      allowedUserIds: Array.isArray(raw.discord?.allowedUserIds)
-          ? raw.discord.allowedUserIds.map(String)
-          : [],
+      allowedUserIds: discordUserIdOverrides && discordUserIdOverrides.length > 0
+          ? discordUserIdOverrides
+          : Array.isArray(raw.discord?.allowedUserIds)
+            ? raw.discord.allowedUserIds.map(String)
+            : [],
       listenChannels: Array.isArray(raw.discord?.listenChannels)
         ? raw.discord.listenChannels.map(String)
         : [],
@@ -284,6 +307,9 @@ function parseSettings(raw: Record<string, any>): Settings {
     stt: {
       baseUrl: typeof raw.stt?.baseUrl === "string" ? raw.stt.baseUrl.trim() : "",
       model: typeof raw.stt?.model === "string" ? raw.stt.model.trim() : "",
+      localModel: typeof raw.stt?.localModel === "string" && raw.stt.localModel.trim() ? raw.stt.localModel.trim() : "large-v3",
+      language: typeof raw.stt?.language === "string" ? raw.stt.language.trim() : "",
+      initialPrompt: typeof raw.stt?.initialPrompt === "string" ? raw.stt.initialPrompt.trim() : "",
     },
     workspace: {
       path: typeof raw.workspace?.path === "string" ? raw.workspace.path.trim() : "",
