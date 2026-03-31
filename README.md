@@ -93,6 +93,7 @@ See [docs/MULTI_SESSION.md](docs/MULTI_SESSION.md) for technical details.
 - **Web Dashboard:** Manage jobs, monitor runs, and inspect logs in real time.
 - **Security Levels:** Four access levels from read-only to full system access.
 - **Model Selection:** Switch models based on your workload.
+- **Settings Hot-Reload:** Changes to `settings.json` are detected automatically via `fs.watch()` with 500ms debounce — no restart needed for heartbeat, STT, and token pool changes.
 
 ## Structured Logging
 
