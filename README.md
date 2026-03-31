@@ -115,6 +115,19 @@ Setup wizard 會引導你設定 model、heartbeat、Telegram、Discord 等，完
   ],
   "tokenStrategy": "fallback-chain",    // "fallback-chain" | "round-robin" | "least-used"
 
+  // ─── Multi-Provider ───
+  "providers": {
+    "openai": { "apiKey": "sk-..." },
+    "anthropic": { "apiKey": "sk-ant-..." },
+    "google": { "apiKey": "AIza..." },
+    "bedrock": { "region": "us-east-1", "accessKeyId": "...", "secretAccessKey": "..." },
+    "ollama": { "baseUrl": "http://localhost:11434" },
+    "workers-ai": { "accountId": "...", "apiToken": "..." },
+    "groq": { "apiKey": "gsk_..." },
+    "deepseek": { "apiKey": "sk-..." },
+    "copilot": { "apiKey": "..." }
+  },
+
   // ─── 時區 ───
   "timezone": "Asia/Taipei",
   "timezoneOffsetMinutes": 480,
@@ -230,6 +243,39 @@ Setup wizard 會引導你設定 model、heartbeat、Telegram、Discord 等，完
 ---
 
 ## Features
+
+### Multi-Provider 支援
+
+ClaudeClaw 支援多種 AI provider，根據 model 名稱前綴自動路由：
+
+| Model 前綴 | Provider | 實作方式 | 範例 |
+|-----------|----------|---------|------|
+| `gpt-*`, `o1-*`, `o3-*`, `o4-*` | OpenAI | OpenAI-compat | `gpt-4o`, `o3-mini` |
+| `claude-*`（有 apiKey） | Anthropic HTTP | Messages API | `claude-sonnet-4-20250514` |
+| `claude-*`（無 apiKey） | Claude CLI | CLI fallback | `claude-sonnet-4-20250514` |
+| `gemini-*` | Google Gemini | Generative AI | `gemini-2.0-flash` |
+| `bedrock/*` | AWS Bedrock | Converse API + SigV4 | `bedrock/anthropic.claude-3` |
+| `ollama/*` | Ollama | `/api/chat` | `ollama/llama3` |
+| `cf/*`, `@cf/*` | Cloudflare Workers AI | OpenAI-compat | `cf/meta/llama-3` |
+| `copilot/*` | GitHub Copilot | OpenAI-compat | `copilot/gpt-4o` |
+| `groq/*` | Groq | OpenAI-compat | `groq/llama-3.3-70b` |
+| `deepseek-*` | DeepSeek | OpenAI-compat | `deepseek-chat` |
+| 其他 | Claude CLI | 預設 fallback | `sonnet`, `opus` |
+
+**設定方式：** 在 `settings.json` 加入 `providers`（只需設定你要用的）：
+
+```json
+{
+  "providers": {
+    "openai": { "apiKey": "sk-..." },
+    "google": { "apiKey": "AIza..." },
+    "groq": { "apiKey": "gsk_..." }
+  }
+}
+```
+
+> **向後相容**：沒設 `providers` 時行為完全不變（走 Claude CLI）。
+> Groq、DeepSeek、Workers AI、Copilot 共用 OpenAI-compatible HTTP client。
 
 ### Multi-Token Pool
 
