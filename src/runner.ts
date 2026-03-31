@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { existsSync } from "fs";
+import { registerChildProcess, unregisterChildProcess } from "./process-manager";
 import { getSession, createSession, incrementTurn, markCompactWarned } from "./sessions";
 import {
   getThreadSession,
@@ -12,6 +13,8 @@ import { getSettings, type ModelConfig, type SecurityConfig, loadWorkspacePrompt
 import { selectToken, recordUsage, isRateLimited, type TokenPoolConfig } from "./token-pool";
 import { buildClockPromptPrefix } from "./timezone";
 import { selectModel } from "./model-router";
+import { getOAuthToken } from "./oauth-provider";
+import { homedir } from "os";
 
 const LOGS_DIR = join(process.cwd(), ".claude/claudeclaw/logs");
 // Resolve prompts relative to the claudeclaw installation, not the project dir
@@ -137,6 +140,8 @@ async function runClaudeOnce(
     env: buildChildEnv(baseEnv, model, api),
   });
 
+  registerChildProcess(proc.pid, `claude-${model || "default"}`);
+
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error(`Claude session timed out after ${timeoutMs / 1000}s`)), timeoutMs);
   });
@@ -150,12 +155,12 @@ async function runClaudeOnce(
       timeoutPromise,
     ]) as [string, string];
     await proc.exited;
+    unregisterChildProcess(proc.pid);
 
     return {
       rawStdout,
       stderr,
       exitCode: proc.exitCode ?? 1,
-    unregisterChildProcess(proc.pid);
     };
   } catch (err) {
     // Capture partial output before killing
@@ -475,6 +480,22 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
   // Strip CLAUDECODE env var so child claude processes don't think they're nested
   const { CLAUDECODE: _, ...cleanEnv } = process.env;
   const baseEnv = { ...cleanEnv } as Record<string, string>;
+
+  // OAuth token injection
+  const { auth } = settings;
+  if (auth.mode === "oauth" || auth.mode === "auto") {
+    const credPath = auth.oauthCredentialsPath.replace(/^~/, homedir());
+    const oauthToken = await getOAuthToken(credPath);
+    if (oauthToken) {
+      baseEnv.ANTHROPIC_AUTH_TOKEN = oauthToken;
+      baseEnv.ANTHROPIC_CUSTOM_HEADERS = "x-claude-client: claude-cli";
+      console.log(`[${new Date().toLocaleTimeString()}] Using OAuth token for authentication`);
+    } else if (auth.mode === "oauth") {
+      console.error(`[${new Date().toLocaleTimeString()}] OAuth mode but no valid token available`);
+    } else {
+      console.log(`[${new Date().toLocaleTimeString()}] OAuth token unavailable, falling back to API key`);
+    }
+  }
 
   let exec = await runClaudeOnce(args, primaryConfig.model, primaryConfig.api, baseEnv, timeoutMs);
   const primaryRateLimit = extractRateLimitMessage(exec.rawStdout, exec.stderr);

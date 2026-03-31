@@ -10,6 +10,8 @@ import { initConfig, loadSettings, reloadSettings, resolvePrompt, type Heartbeat
 import { getDayAndMinuteAtOffset } from "../timezone";
 import { startWebUi, type WebServerHandle } from "../web";
 import type { Job } from "../jobs";
+import { peekSession } from "../sessions";
+import { getContextUsage } from "../context-monitor";
 
 const CLAUDE_DIR = join(process.cwd(), ".claude");
 const HEARTBEAT_DIR = join(CLAUDE_DIR, "claudeclaw");
@@ -320,6 +322,12 @@ export async function start(args: string[] = []) {
   let discordStopGateway: (() => void) | null = null;
 
   async function shutdown() {
+    const { shutdownAll } = await import("../process-manager");
+    const result = await shutdownAll(5000);
+    if (result.terminated.length > 0)
+      console.log(`Gracefully terminated: ${result.terminated.join(", ")}`);
+    if (result.killed.length > 0)
+      console.log(`Force killed: ${result.killed.join(", ")}`);
     if (discordStopGateway) discordStopGateway();
     if (web) web.stop();
     await teardownStatusline();
@@ -347,6 +355,7 @@ export async function start(args: string[] = []) {
   let currentJobs: Job[] = jobs;
   let nextHeartbeatAt = 0;
   let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastHeartbeatAt = 0;
   const daemonStartedAt = Date.now();
 
   // --- Telegram ---
