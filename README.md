@@ -19,201 +19,247 @@
   <a href="https://github.com/moazbuilds/ClaudeClaw/graphs/contributors">
     <img src="https://img.shields.io/github/contributors/moazbuilds/ClaudeClaw?style=flat-square&color=a855f7" alt="Contributors" />
   </a>
-  <a href="https://x.com/moazbuilds">
-    <img src="https://img.shields.io/badge/X-%40moazbuilds-000000?style=flat-square&logo=x" alt="X @moazbuilds" />
-  </a>
 </p>
 
-<p align="center"><b>A lightweight, open-source OpenClaw version built into your Claude Code.</b></p>
+<p align="center"><b>A lightweight, open-source OpenClaw alternative built on Claude Code.</b></p>
 
-ClaudeClaw turns your Claude Code into a personal assistant that never sleeps. It runs as a background daemon, executing tasks on a schedule, responding to messages on Telegram and Discord, transcribing voice commands, and integrating with any service you need.
+ClaudeClaw 把你的 Claude Code 變成一個永不停歇的個人助理。它以背景 daemon 運行，支援排程任務、Telegram / Discord 訊息互動、語音辨識、多帳號輪轉，以及各種自動化整合。
 
-> Note: Please don't use ClaudeClaw for hacking any bank system or doing any illegal activities. Thank you.
+> ⚠️ 請勿將 ClaudeClaw 用於任何非法活動。
 
-## Why ClaudeClaw?
+---
+
+## 目錄
+
+- [Overview](#overview)
+- [Getting Started](#getting-started)
+- [Configuration](#configuration)
+  - [完整 settings.json 範例](#完整-settingsjson-範例)
+  - [欄位說明](#欄位說明)
+- [Features](#features)
+  - [Multi-Token Pool](#multi-token-pool)
+  - [Claude OAuth](#claude-oauth)
+  - [STT 語音辨識](#stt-語音辨識)
+  - [Session Auto-Compact](#session-auto-compact)
+  - [Heartbeat](#heartbeat)
+  - [Discord Thread Hire/Fire](#discord-thread-hirefire)
+  - [Session Metrics](#session-metrics)
+  - [Concurrent Processing](#concurrent-processing)
+  - [Skill System](#skill-system)
+  - [Graceful Shutdown](#graceful-shutdown)
+  - [Structured Logging](#structured-logging)
+  - [Settings Hot-Reload](#settings-hot-reload)
+- [Troubleshooting](#troubleshooting)
+- [Testing](#testing)
+- [Development](#development)
+- [Screenshots](#screenshots)
+- [Contributors](#contributors)
+
+---
+
+## Overview
 
 | Category | ClaudeClaw | OpenClaw |
 | --- | --- | --- |
-| Anthropic Will Come After You | No | Yes |
-| API Overhead | Directly uses your Claude Code subscription | Nightmare |
-| Setup & Installation | ~5 minutes | Nightmare |
-| Deployment | Install Claude Code on any device or VPS and run | Nightmare |
-| Isolation Model | Folder-based and isolated as needed | Global by default (security nightmare) |
-| Reliability | Simple reliable system for agents | Bugs nightmare |
-| Feature Scope | Lightweight features you actually use | 600k+ LOC nightmare |
-| Security | Average Claude Code usage | Nightmare |
-| Cost Efficiency | Efficient usage | Nightmare |
-| Memory | Uses Claude internal memory system + `CLAUDE.md` | Nightmare |
+| API Overhead | 直接使用 Claude Code 訂閱 | 需要獨立 API key |
+| Setup | ~5 分鐘 | 複雜 |
+| Deployment | 任意裝有 Claude Code 的裝置 | 需要完整基礎設施 |
+| Isolation | 資料夾層級隔離 | 全域共享 |
+| Feature Scope | 輕量精實 | 600k+ LOC |
 
-## Getting Started in 5 Minutes
+## Getting Started
 
 ```bash
 claude plugin marketplace add moazbuilds/claudeclaw
 claude plugin install claudeclaw
 ```
-Then open a Claude Code session and run:
+
+在 Claude Code 中執行：
+
 ```
 /claudeclaw:start
 ```
-The setup wizard walks you through model, heartbeat, Telegram, Discord, and security, then your daemon is live with a web dashboard.
 
-## What Would Be Built Next?
+Setup wizard 會引導你設定 model、heartbeat、Telegram、Discord 等，完成後 daemon 即上線。
 
-> **Mega Post:** Help shape the next ClaudeClaw features.
-> Vote, suggest ideas, and discuss priorities in **[this post](https://github.com/moazbuilds/claudeclaw/issues/14)**.
+---
 
-<p align="center">
-  <a href="https://github.com/moazbuilds/claudeclaw/issues/14">
-    <img src="https://img.shields.io/badge/Roadmap-Mega%20Post-blue?style=for-the-badge&logo=github" alt="Roadmap Mega Post" />
-  </a>
-</p>
+## Configuration
 
-## Features
+所有設定存放在 `~/.claude/claudeclaw/settings.json`。
 
-### Automation
-- **Heartbeat:** Periodic check-ins with configurable intervals, quiet hours, dedicated model override, and per-channel forwarding control. Each heartbeat includes model info, session turn count, last heartbeat time, and context usage percentage.
-- **Cron Jobs:** Timezone-aware schedules for repeating or one-time tasks with reliable execution.
+### 完整 settings.json 範例
 
-### Communication
-- **Telegram:** Text, image, and voice support.
-- **Discord:** DMs, server mentions/replies, slash commands, voice messages, and image attachments.
-- **Time Awareness:** Message time prefixes help the agent understand delays and daily patterns.
-
-### Multi-Session Threads (Discord)
-- **Independent Thread Sessions:** Each Discord thread gets its own Claude CLI session, fully isolated from the main channel.
-- **Parallel Processing:** Thread conversations run concurrently — messages in different threads don't block each other. Configurable via `maxConcurrent` in `settings.json` (default: 3).
-- **Auto-Create:** First message in a new thread automatically bootstraps a fresh session. No setup needed.
-- **Session Cleanup:** Thread sessions are automatically cleaned up when threads are deleted or archived.
-- **Backward Compatible:** DMs and main channel messages continue using the global session.
-
-See [docs/MULTI_SESSION.md](docs/MULTI_SESSION.md) for technical details.
-
-### Reliability and Control
-- **GLM Fallback:** Automatically continue with GLM models if your primary limit is reached.
-- **Web Dashboard:** Manage jobs, monitor runs, and inspect logs in real time.
-- **Security Levels:** Four access levels from read-only to full system access.
-- **Model Selection:** Switch models based on your workload.
-- **Settings Hot-Reload:** Changes to `settings.json` are detected automatically via `fs.watch()` with 500ms debounce — no restart needed for heartbeat, STT, and token pool changes.
-- **Session Metrics:** Every session execution is logged to `~/.claude/claudeclaw/metrics.jsonl` with timestamp, source, model, duration, and exit code. Use `/metrics` in Discord to view a 7-day summary.
-- **Progress Reporting:** Long-running tasks now send periodic status updates (every 60s) to Discord/Telegram, showing which tool Claude is currently using (e.g. "⏳ 正在執行 讀取檔案..."). No more staring at a typing indicator wondering what's happening.
-
-## Structured Logging
-
-ClaudeClaw uses a unified structured logger (`src/logger.ts`). All log output goes to:
-
-1. **stdout** — human-readable format with timestamp and source tag (for `journalctl`)
-2. **`/tmp/claudeclaw-structured.log`** — one JSON object per line (NDJSON)
-
-### Log Entry Format
-
-```json
+```jsonc
 {
-  "timestamp": "2026-03-31T13:51:00.000Z",
-  "level": "info",
-  "source": "discord",
-  "message": "Session created: abc123",
-  "meta": { "session_id": "abc123", "user": "rex" }
-}
-```
+  // ─── 核心 ───
+  "model": "sonnet",                    // 預設 Claude model
+  "api": "sk-ant-xxx",                  // Anthropic API key（api-key 模式用）
 
-### jq Query Examples
+  // ─── 認證 ───
+  "auth": {
+    "mode": "api-key",                  // "api-key" | "oauth" | "auto"
+    "oauthCredentialsPath": "~/.claude/.credentials.json"
+  },
 
-```bash
-# 所有 error level 的 log
-cat /tmp/claudeclaw-structured.log | jq 'select(.level == "error")'
+  // ─── Fallback model ───
+  "fallback": {
+    "model": "haiku",
+    "api": "sk-ant-yyy"
+  },
 
-# 只看 Discord 來源
-cat /tmp/claudeclaw-structured.log | jq 'select(.source == "discord")'
+  // ─── Token Pool（多帳號輪轉）───
+  "tokenPool": [
+    { "name": "rex", "model": "opus", "api": "sk-ant-xxx1", "priority": 1 },
+    { "name": "alice", "model": "sonnet", "api": "sk-ant-xxx2", "priority": 2 }
+  ],
+  "tokenStrategy": "fallback-chain",    // "fallback-chain" | "round-robin" | "least-used"
 
-# 最近 10 筆 log
-tail -10 /tmp/claudeclaw-structured.log | jq .
+  // ─── 時區 ───
+  "timezone": "Asia/Taipei",
+  "timezoneOffsetMinutes": 480,
 
-# 搜尋特定 session
-cat /tmp/claudeclaw-structured.log | jq 'select(.meta.session_id == "abc123")'
-
-# 統計各 level 數量
-cat /tmp/claudeclaw-structured.log | jq -s 'group_by(.level) | map({level: .[0].level, count: length})'
-```
-
-### Usage in Code
-
-```typescript
-import { createLogger } from "./logger";
-const logger = createLogger("discord");
-
-logger.info("Bot started");
-logger.error("Connection failed", { error: "timeout", retry: 3 });
-```
-
-## Token Pool（多帳號輪轉）
-
-團隊有多個 Claude 帳號時，可設定 token pool 自動輪轉和 rate limit 切換。
-
-### Heartbeat 設定
-
-在 `settings.json` 的 `heartbeat` 欄位設定：
-
-```json
-{
+  // ─── Heartbeat ───
   "heartbeat": {
     "enabled": true,
-    "interval": 60,
-    "model": "sonnet",
-    "prompt": "",
-    "forwardToTelegram": true,
-    "forwardToDiscord": false,
+    "interval": 15,                     // 分鐘
+    "prompt": "",                       // 自訂 heartbeat prompt
+    "forwardToTelegram": true,          // HEARTBEAT_OK 也轉發
     "excludeWindows": [
-      { "start": "23:00", "end": "08:00" }
+      { "start": "23:00", "end": "08:00" },
+      { "days": [0, 6], "start": "00:00", "end": "23:59" }
+    ]
+  },
+
+  // ─── Telegram ───
+  "telegram": {
+    "token": "123456:ABC-DEF",
+    "allowedUserIds": [123456789]
+  },
+
+  // ─── Discord ───
+  "discord": {
+    "token": "Bot xxx",
+    "allowedUserIds": ["123456789012345678"],
+    "listenChannels": ["987654321098765432"]
+  },
+
+  // ─── 安全 ───
+  "security": {
+    "level": "moderate",                // "locked" | "strict" | "moderate" | "unrestricted"
+    "allowedTools": [],
+    "disallowedTools": []
+  },
+
+  // ─── Web Dashboard ───
+  "web": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 4632
+  },
+
+  // ─── STT 語音辨識 ───
+  "stt": {
+    "baseUrl": "",                      // 有值走 API，空值走本機 whisper.cpp
+    "model": "",                        // API model 名稱
+    "localModel": "large-v3",           // 本機 whisper.cpp model
+    "language": "zh",                   // 語言代碼
+    "initialPrompt": "以下是繁體中文的語音內容。QVS QPKG QNAP..."
+  },
+
+  // ─── Workspace ───
+  "workspace": {
+    "path": ""                          // 共用 prompt / skills 目錄
+  },
+
+  // ─── 並行處理 ───
+  "maxConcurrent": 3,                   // 最大同時處理訊息數
+
+  // ─── Agentic Mode（實驗性）───
+  "agentic": {
+    "enabled": false,
+    "defaultMode": "implementation",
+    "modes": [
+      {
+        "name": "planning",
+        "model": "opus",
+        "keywords": ["plan", "design", "architect"],
+        "phrases": ["how to implement", "what's the best way to"]
+      },
+      {
+        "name": "implementation",
+        "model": "sonnet",
+        "keywords": ["implement", "code", "fix", "deploy"]
+      }
     ]
   }
 }
 ```
 
-| 欄位 | 說明 |
-|------|------|
-| `model` | Heartbeat 專用 model，空字串時使用全域 `model` |
-| `forwardToTelegram` | HEARTBEAT_OK 也轉發到 Telegram（非 OK 訊息一律轉發） |
-| `forwardToDiscord` | HEARTBEAT_OK 也轉發到 Discord（非 OK 訊息一律轉發） |
-| `excludeWindows` | 深夜靜默時段，支援跨日（如 23:00→08:00）及指定星期幾 |
+### 欄位說明
 
-每次 heartbeat 會自動注入狀態資訊供 Claude 參考：使用的 model、session turn count、上次 heartbeat 時間、context 用量百分比。
+| 欄位 | 類型 | 預設值 | 說明 |
+|------|------|--------|------|
+| `model` | string | `""` | 預設 Claude model（如 `sonnet`、`opus`） |
+| `api` | string | `""` | Anthropic API key |
+| `auth.mode` | string | `"api-key"` | 認證模式：`api-key`、`oauth`、`auto` |
+| `auth.oauthCredentialsPath` | string | `"~/.claude/.credentials.json"` | OAuth credentials 路徑 |
+| `fallback.model` | string | `""` | 主 model 超限時的備用 model |
+| `fallback.api` | string | `""` | 備用 API key |
+| `tokenPool` | array | `[]` | 多帳號 token 池，見 [Multi-Token Pool](#multi-token-pool) |
+| `tokenStrategy` | string | `"fallback-chain"` | Token 選擇策略 |
+| `timezone` | string | `"UTC"` | IANA 時區名稱 |
+| `heartbeat.enabled` | boolean | `false` | 啟用定期 heartbeat |
+| `heartbeat.interval` | number | `15` | Heartbeat 間隔（分鐘） |
+| `heartbeat.prompt` | string | `""` | 自訂 heartbeat prompt |
+| `heartbeat.forwardToTelegram` | boolean | `true` | HEARTBEAT_OK 是否轉發 Telegram |
+| `heartbeat.excludeWindows` | array | `[]` | 靜默時段，支援跨日與星期過濾 |
+| `telegram.token` | string | `""` | Telegram Bot token |
+| `telegram.allowedUserIds` | number[] | `[]` | 允許的 Telegram user ID |
+| `discord.token` | string | `""` | Discord Bot token |
+| `discord.allowedUserIds` | string[] | `[]` | 允許的 Discord user ID（snowflake） |
+| `discord.listenChannels` | string[] | `[]` | 不用 @ 即回應的頻道 ID |
+| `security.level` | string | `"moderate"` | 安全等級 |
+| `web.enabled` | boolean | `false` | 啟用 Web Dashboard |
+| `web.host` | string | `"127.0.0.1"` | Dashboard 綁定位址 |
+| `web.port` | number | `4632` | Dashboard 埠號 |
+| `stt.*` | object | — | 語音辨識設定，見 [STT 語音辨識](#stt-語音辨識) |
+| `workspace.path` | string | `""` | Workspace 目錄路徑（含 AGENTS.md、skills/） |
+| `maxConcurrent` | number | `3` | 最大同時處理訊息數 |
 
-### Token Pool
+---
 
-在 `settings.json` 新增 `tokenPool` 和 `tokenStrategy`：
+## Features
+
+### Multi-Token Pool
+
+團隊有多個 Claude 帳號時，自動輪轉與 rate limit 切換。
 
 ```json
 {
   "tokenPool": [
     { "name": "rex", "model": "opus", "api": "sk-ant-xxx1", "priority": 1 },
-    { "name": "alice", "model": "opus", "api": "sk-ant-xxx2", "priority": 2 },
-    { "name": "bob", "model": "sonnet", "api": "sk-ant-xxx3", "priority": 3 }
+    { "name": "alice", "model": "sonnet", "api": "sk-ant-xxx2", "priority": 2 }
   ],
   "tokenStrategy": "fallback-chain"
 }
 ```
 
-### 策略
+**策略：**
 
 | 策略 | 說明 |
 |------|------|
-| `fallback-chain` | 按 `priority` 順序使用，遇到 rate limit 自動切換下一個（預設） |
-| `round-robin` | 每次請求輪流使用不同帳號 |
-| `least-used` | 追蹤使用次數，每次挑使用最少的帳號 |
+| `fallback-chain` | 按 `priority` 順序使用，遇 rate limit 自動切下一個（預設） |
+| `round-robin` | 輪流使用 |
+| `least-used` | 使用次數最少的優先 |
 
-### 向後相容
+自動偵測 Claude 輸出中的 rate limit 訊息（"you've hit your limit" / "out of extra usage"）觸發切換。未設定 `tokenPool` 時使用原有 `api` + `fallback` 機制。
 
-沒有設定 `tokenPool` 時，仍使用原本的 `api` + `fallback` 機制，完全不受影響。
+---
 
-### Rate Limit 偵測
+### Claude OAuth
 
-自動檢查 Claude 輸出中的 "you've hit your limit" 或 "out of extra usage" 訊息，觸發切換。
-
-## OAuth 認證（使用 Claude CLI Token）
-
-ClaudeClaw 支援使用 Claude CLI 的 OAuth token 呼叫 Anthropic API，省去額外的 API 費用。
-
-在 `settings.json` 加入 `auth` 設定：
+使用 Claude CLI 的 OAuth token 呼叫 API，省去額外費用。
 
 ```json
 {
@@ -224,50 +270,21 @@ ClaudeClaw 支援使用 Claude CLI 的 OAuth token 呼叫 Anthropic API，省去
 }
 ```
 
-### 模式
-
 | mode | 行為 |
 |------|------|
-| `api-key` | 使用 `api` 欄位的 API key（預設，向後相容） |
+| `api-key` | 使用 `api` 欄位（預設） |
 | `oauth` | 使用 OAuth token，無 token 則報錯 |
-| `auto` | 優先使用 OAuth token，失敗則 fallback 到 API key |
+| `auto` | 優先 OAuth，失敗 fallback 到 API key |
 
-### 運作原理
+前置條件：已執行 `claude login`，`~/.claude/.credentials.json` 存在。Token 快過期時自動 refresh，30 秒 cache 避免重複磁碟讀取。
 
-1. 讀取 `~/.claude/.credentials.json`（Claude CLI 登入後自動產生）
-2. Token 快過期時自動呼叫 `claude` CLI 觸發 refresh
-3. 30 秒 cache TTL 避免重複讀取磁碟
+> ⚠️ **風險警告：** 此功能透過非官方方式使用 Claude CLI OAuth token，可能違反 Anthropic ToS。風險由使用者自行承擔。
 
-### 前置條件
+---
 
-- 已安裝 Claude CLI 並完成 `claude login`
-- `~/.claude/.credentials.json` 存在且包含有效的 OAuth token
+### STT 語音辨識
 
-### ⚠️ 風險警告
-
-> **此功能使用 Claude CLI 的 OAuth token 透過非官方方式呼叫 API。**
-> 這可能違反 Anthropic 的服務條款（Terms of Service）。使用此功能的風險由使用者自行承擔。
-> Anthropic 可能隨時變更認證機制，導致此功能失效。
-
-## 並行處理設定
-
-ClaudeClaw 預設最多同時處理 3 個訊息（跨不同 thread/channel）。同一 thread 內的訊息仍按順序處理。
-
-在 `settings.json` 設定 `maxConcurrent`：
-
-```json
-{
-  "maxConcurrent": 3
-}
-```
-
-調高可加速多 thread 回應，但會增加 API 並行負載。
-
-## STT / 語音辨識設定
-
-ClaudeClaw 支援語音訊息轉文字，可透過本機 whisper.cpp 或遠端 API 兩種模式。
-
-在 `settings.json` 的 `stt` 欄位設定：
+語音訊息自動轉文字，支援本機 whisper.cpp 或遠端 OpenAI 相容 API。
 
 ```json
 {
@@ -283,90 +300,251 @@ ClaudeClaw 支援語音訊息轉文字，可透過本機 whisper.cpp 或遠端 A
 
 | 欄位 | 說明 | 預設值 |
 |------|------|--------|
-| `baseUrl` | OpenAI 相容 STT API 的 URL。有值時走 API 模式，空值走本機 whisper.cpp | `""` |
-| `model` | API 模式使用的 model 名稱 | `"Systran/faster-whisper-large-v3"` |
-| `localModel` | 本機 whisper.cpp 使用的 model 名稱 | `"large-v3"` |
-| `language` | 語言代碼（如 `zh`、`en`、`ja`），同時適用 API 和本機模式 | `""` |
-| `initialPrompt` | 提示詞，幫助模型理解領域術語，提升辨識準確度 | `""` |
+| `baseUrl` | STT API URL，有值走 API，空值走本機 | `""` |
+| `model` | API model 名稱 | `"Systran/faster-whisper-large-v3"` |
+| `localModel` | 本機 whisper.cpp model | `"large-v3"` |
+| `language` | 語言代碼（`zh`、`en`、`ja`） | `""` |
+| `initialPrompt` | 提示詞，提升專有名詞辨識 | `""` |
 
-**中文使用者建議設定：**
-- `localModel`: `"large-v3"`（預設值已適用，避免使用 `base.en`）
-- `language`: `"zh"`
-- `initialPrompt`: 加入常用專有名詞提升準確度
+Model 檔案首次使用時自動從 HuggingFace 下載。中文建議：`localModel: "large-v3"`、`language: "zh"`。
 
-Model 檔案會在首次使用時自動從 HuggingFace 下載。
+---
 
-## FAQ
+### Session Auto-Compact
 
-<details open>
-  <summary><strong>Can ClaudeClaw do &lt;something&gt;?</strong></summary>
-  <p>
-    If Claude Code can do it, ClaudeClaw can do it too. ClaudeClaw adds cron jobs,
-    heartbeats, and Telegram/Discord bridges on top. You can also give your ClaudeClaw new
-    skills and teach it custom workflows.
-  </p>
-</details>
+當 session context 使用率逼近上限時，自動觸發 compact 避免 context overflow。
 
-<details open>
-  <summary><strong>Is this project breaking Anthropic ToS?</strong></summary>
-  <p>
-    No. ClaudeClaw is local usage inside the Claude Code ecosystem. It wraps Claude Code
-    directly and does not require third-party OAuth outside that flow.
-    If you build your own scripts to do the same thing, it would be the same.
-  </p>
-</details>
+由 `context-monitor.ts` 持續追蹤 context 用量百分比，達到門檻時自動執行 session compact，壓縮對話歷史釋放空間。無需手動介入。
 
-<details open>
-  <summary><strong>Will Anthropic sue you for building ClaudeClaw?</strong></summary>
-  <p>
-    I hope not.
-  </p>
-</details>
+---
 
-<details open>
-  <summary><strong>Are you ready to change this project name?</strong></summary>
-  <p>
-    If it bothers Anthropic, I might rename it to OpenClawd. Not sure yet.
-  </p>
-</details>
+### Heartbeat
+
+定期心跳檢查，讓 agent 保持活躍並主動處理待辦事項。
+
+```json
+{
+  "heartbeat": {
+    "enabled": true,
+    "interval": 15,
+    "prompt": "",
+    "forwardToTelegram": true,
+    "excludeWindows": [
+      { "start": "23:00", "end": "08:00" }
+    ]
+  }
+}
+```
+
+每次 heartbeat 自動注入狀態資訊：使用的 model、session turn count、上次 heartbeat 時間、context 用量百分比。`excludeWindows` 支援跨日時段與 `days` 星期過濾。非 OK 訊息一律轉發至 Telegram/Discord。
+
+---
+
+### Discord Thread Hire/Fire
+
+在 Discord thread 中獨立管理 Claude session，支援 hire（啟用）和 fire（停用）指令。
+
+- **獨立 Session：** 每個 thread 有自己的 Claude CLI session，與主頻道完全隔離
+- **Hire/Fire：** 透過 intent classifier 解析指令，動態控制 thread session
+- **Auto-Create：** 新 thread 首次訊息自動建立 session
+- **Session Cleanup：** Thread 刪除或歸檔時自動清理
+
+詳見 [docs/MULTI_SESSION.md](docs/MULTI_SESSION.md)。
+
+---
+
+### Session Metrics
+
+每次 session 執行自動記錄到 `~/.claude/claudeclaw/metrics.jsonl`。
+
+記錄欄位：timestamp、source、model、duration、exit code。在 Discord 使用 `/metrics` 指令可查看 7 天摘要。
+
+---
+
+### Concurrent Processing
+
+跨 thread/channel 的訊息並行處理，同一 thread 內仍按順序。
+
+```json
+{
+  "maxConcurrent": 3
+}
+```
+
+由 `queue-manager.ts` 管理。調高可加速多 thread 回應，但會增加 API 並行負載。
+
+---
+
+### Skill System
+
+載入 workspace 目錄下的 skills，擴展 agent 能力。
+
+```json
+{
+  "workspace": {
+    "path": "/path/to/workspace"
+  }
+}
+```
+
+Workspace 遵循 OpenClaw 慣例：根目錄放 `AGENTS.md`、`SOUL.md`、`TOOLS.md`、`KNOWLEDGE.md`，`skills/` 目錄放各 skill 的 `SKILL.md`。啟動時自動載入並注入 prompt。
+
+---
+
+### Graceful Shutdown
+
+收到 SIGINT / SIGTERM 時，等待所有執行中的子程序完成後再退出。
+
+由 `process-manager.ts` 追蹤所有 child process，shutdown 時逐一發送終止訊號並等待退出，避免中斷正在進行的 Claude session。
+
+---
+
+### Structured Logging
+
+統一結構化日誌，同時輸出人類可讀格式與機器可解析的 NDJSON。
+
+輸出目標：
+1. **stdout** — 帶時間戳與來源標籤（方便 `journalctl`）
+2. **`/tmp/claudeclaw-structured.log`** — 每行一個 JSON 物件
+
+```json
+{
+  "timestamp": "2026-03-31T13:51:00.000Z",
+  "level": "info",
+  "source": "discord",
+  "message": "Session created: abc123",
+  "meta": { "session_id": "abc123", "user": "rex" }
+}
+```
+
+```bash
+# 所有 error
+cat /tmp/claudeclaw-structured.log | jq 'select(.level == "error")'
+
+# 只看 Discord 來源
+cat /tmp/claudeclaw-structured.log | jq 'select(.source == "discord")'
+
+# 統計各 level 數量
+cat /tmp/claudeclaw-structured.log | jq -s 'group_by(.level) | map({level: .[0].level, count: length})'
+```
+
+程式碼使用：
+
+```typescript
+import { createLogger } from "./logger";
+const logger = createLogger("discord");
+logger.info("Bot started");
+logger.error("Connection failed", { error: "timeout", retry: 3 });
+```
+
+---
+
+### Settings Hot-Reload
+
+修改 `settings.json` 後自動偵測並套用，不需重啟。
+
+由 `settings-watcher.ts` 透過 `fs.watch()` 監聽，500ms debounce 防止頻繁觸發。支援 heartbeat、STT、token pool 等設定的即時更新。
+
+---
+
+## Troubleshooting
+
+| 問題 | 解法 |
+|------|------|
+| Daemon 啟動失敗 | 確認 Claude Code 已安裝且可執行 `claude` 指令 |
+| Telegram/Discord 無回應 | 檢查 `settings.json` 中的 token 與 allowedUserIds |
+| 語音辨識失敗 | 確認 whisper.cpp 已安裝，或 `stt.baseUrl` 指向有效的 API |
+| OAuth token 過期 | 執行 `claude login` 重新登入 |
+| Token Pool 全部 rate limited | 等待冷卻或新增帳號至 `tokenPool` |
+| Settings 修改後沒生效 | 確認 JSON 語法正確（`jq . settings.json`），watcher 會忽略格式錯誤的檔案 |
+| Context overflow | Session auto-compact 應自動處理；若持續發生可縮短 heartbeat interval |
+
+---
 
 ## Testing
-
-執行所有測試：
 
 ```bash
 bun test
 ```
 
-### 測試覆蓋範圍
-
 | 模組 | 測試檔案 | 涵蓋內容 |
 |------|---------|---------|
-| `runner.ts` | `tests/runner.test.ts` | buildChildEnv、rate limit 偵測、security args、serial queue、timeout 格式 |
-| `config.ts` | `tests/config.test.ts` | resolvePrompt、parseSettings 預設值/空值/無效輸入、Discord snowflake 解析、exclude windows |
-| `sessions.ts` | `tests/sessions.test.ts` | session CRUD（create/peek/reset/backup）、turnCount 遞增、compactWarned 標記 |
-| `token-pool.ts` | `tests/token-pool.test.ts` | fallback-chain / round-robin / least-used 策略、rate limit 偵測 |
+| `runner.ts` | `tests/runner.test.ts` | buildChildEnv、rate limit 偵測、security args、serial queue、timeout |
+| `config.ts` | `tests/config.test.ts` | resolvePrompt、parseSettings、Discord snowflake、exclude windows |
+| `sessions.ts` | `tests/sessions.test.ts` | session CRUD、turnCount、compactWarned |
+| `token-pool.ts` | `tests/token-pool.test.ts` | 三種策略、rate limit 偵測 |
 | `intent-classifier.ts` | `tests/intent-classifier.test.ts` | hire/fire 指令解析、群組展開 |
-| `oauth-provider.ts` | `tests/oauth-provider.test.ts` | OAuth credentials 讀取、token 過期判斷 |
+| `oauth-provider.ts` | `tests/oauth-provider.test.ts` | credentials 讀取、token 過期判斷 |
 | `context-monitor.ts` | `tests/context-monitor.test.ts` | context usage 計算、auto-compact 門檻 |
 | `logger.ts` | `tests/logger.test.ts` | 結構化 JSON log、level filtering |
-| `process-manager.ts` | `tests/process-manager.test.ts` | 子程序註冊/反註冊、graceful shutdown |
+| `process-manager.ts` | `tests/process-manager.test.ts` | 子程序管理、graceful shutdown |
 | `settings-watcher.ts` | `tests/settings-watcher.test.ts` | 設定變更監聽、debounce |
 | `whisper.ts` | `tests/whisper.test.ts` | STT model URL/path、config 讀取 |
 
-所有測試使用 mock/spy，不會真的呼叫 Claude CLI。
+所有測試使用 mock/spy，不會呼叫實際 Claude CLI。
+
+---
+
+## Development
+
+```bash
+# 開發模式（hot reload）
+bun run dev:web
+
+# 執行測試
+bun test
+
+# 專案結構
+src/
+├── index.ts              # 入口
+├── config.ts             # 設定解析
+├── runner.ts             # Claude CLI 執行器
+├── sessions.ts           # Session 管理
+├── sessionManager.ts     # Multi-session 管理
+├── token-pool.ts         # Token Pool 輪轉
+├── oauth-provider.ts     # OAuth 認證
+├── whisper.ts            # STT 語音辨識
+├── context-monitor.ts    # Context 用量監控
+├── intent-classifier.ts  # Hire/Fire 指令解析
+├── metrics.ts            # Session Metrics
+├── queue-manager.ts      # 並行佇列管理
+├── skills.ts             # Skill System
+├── process-manager.ts    # Graceful Shutdown
+├── logger.ts             # Structured Logging
+├── settings-watcher.ts   # Settings Hot-Reload
+├── progress-reporter.ts  # 進度回報
+├── cron.ts               # Cron 排程
+├── web.ts                # Web Dashboard
+└── ui/                   # Dashboard UI
+```
+
+---
 
 ## Screenshots
 
-### Claude Code Folder-Based Status Bar
+### Claude Code Status Bar
 ![Claude Code folder-based status bar](images/bar.png)
 
-### Cool UI to Manage and Check Your ClaudeClaw
+### Web Dashboard
 ![Cool UI to manage and check your ClaudeClaw](images/dashboard.png)
 
-## Contributors
+---
 
-Thanks for helping make ClaudeClaw better.
+## FAQ
+
+<details>
+  <summary><strong>ClaudeClaw 能做什麼？</strong></summary>
+  <p>Claude Code 能做的，ClaudeClaw 都能做。額外支援 cron、heartbeat、Telegram/Discord 橋接、語音辨識、多帳號輪轉等。</p>
+</details>
+
+<details>
+  <summary><strong>這個專案違反 Anthropic ToS 嗎？</strong></summary>
+  <p>ClaudeClaw 是本機使用 Claude Code 的包裝層，不涉及第三方 OAuth。OAuth 模式除外（見警告）。</p>
+</details>
+
+---
+
+## Contributors
 
 <a href="https://github.com/moazbuilds/claudeclaw/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=moazbuilds/claudeclaw" />
