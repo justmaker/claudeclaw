@@ -95,6 +95,7 @@ See [docs/MULTI_SESSION.md](docs/MULTI_SESSION.md) for technical details.
 - **Model Selection:** Switch models based on your workload.
 - **Settings Hot-Reload:** Changes to `settings.json` are detected automatically via `fs.watch()` with 500ms debounce — no restart needed for heartbeat, STT, and token pool changes.
 - **Session Metrics:** Every session execution is logged to `~/.claude/claudeclaw/metrics.jsonl` with timestamp, source, model, duration, and exit code. Use `/metrics` in Discord to view a 7-day summary.
+- **Progress Reporting:** Long-running tasks now send periodic status updates (every 60s) to Discord/Telegram, showing which tool Claude is currently using (e.g. "⏳ 正在執行 讀取檔案..."). No more staring at a typing indicator wondering what's happening.
 
 ## Structured Logging
 
