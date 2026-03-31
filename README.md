@@ -84,15 +84,18 @@ The setup wizard walks you through model, heartbeat, Telegram, Discord, and secu
 - **Parallel Processing:** Thread conversations run concurrently — messages in different threads don't block each other.
 - **Auto-Create:** First message in a new thread automatically bootstraps a fresh session. No setup needed.
 - **Session Cleanup:** Thread sessions are automatically cleaned up when threads are deleted or archived.
+- **Fast Intent Classifier:** Thread hire/fire commands (`hire X`, `fire X`, `派出 X`, `撤回 X`, `叫 X 出來`, etc.) are matched by regex first for instant response (<1ms), with AI fallback only when needed. Supports multiple names, Chinese/English mix, and group expansions (e.g. `桃園三結義` → 劉備、關羽、張飛).
 - **Backward Compatible:** DMs and main channel messages continue using the global session.
 
 See [docs/MULTI_SESSION.md](docs/MULTI_SESSION.md) for technical details.
 
 ### Reliability and Control
 - **GLM Fallback:** Automatically continue with GLM models if your primary limit is reached.
+- **Auto Compact:** Automatically compact session context when usage exceeds threshold, preventing timeout errors.
 - **Web Dashboard:** Manage jobs, monitor runs, and inspect logs in real time.
 - **Security Levels:** Four access levels from read-only to full system access.
 - **Model Selection:** Switch models based on your workload.
+- **Plugin Graceful Shutdown:** All child processes (Claude CLI, MCP servers, plugin workers) are tracked and gracefully terminated on SIGTERM/SIGINT. Processes that don't exit within 5 seconds are force-killed, ensuring clean systemd restarts.
 
 ## Structured Logging
 
@@ -174,6 +177,35 @@ logger.error("Connection failed", { error: "timeout", retry: 3 });
 ### Rate Limit 偵測
 
 自動檢查 Claude 輸出中的 "you've hit your limit" 或 "out of extra usage" 訊息，觸發切換。
+
+## Session 自動 Compact
+
+當 thread session 的 context 用量過高時，ClaudeClaw 會在執行前自動 compact，避免 timeout（exit 124）。
+
+### 設定
+
+在 `settings.json` 中：
+
+```json
+{
+  "autoCompact": {
+    "enabled": true,
+    "threshold": 0.8
+  }
+}
+```
+
+- **enabled**: 是否啟用預執行自動 compact（預設 `true`）
+- **threshold**: 觸發 compact 的 context 用量比例（預設 `0.8`，即 80% of 200K tokens）
+
+### 運作原理
+
+1. 每次 resume session 執行 Claude Code 前，讀取 session JSONL 的最新 usage 資料
+2. 計算 `(input_tokens + cache_creation_tokens + cache_read_tokens + output_tokens) / 200K`
+3. 若超過 threshold，自動執行 `/compact` 再繼續原始任務
+4. Compact 失敗不阻擋，繼續嘗試原始執行
+
+搭配既有的 timeout auto-compact（exit 124 後自動 compact + retry），提供雙層保護。
 
 ## STT / 語音辨識設定
 

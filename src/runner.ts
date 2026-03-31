@@ -155,6 +155,7 @@ async function runClaudeOnce(
       rawStdout,
       stderr,
       exitCode: proc.exitCode ?? 1,
+    unregisterChildProcess(proc.pid);
     };
   } catch (err) {
     // Capture partial output before killing

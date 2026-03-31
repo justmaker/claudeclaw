@@ -12,6 +12,10 @@ const LOGS_DIR = join(HEARTBEAT_DIR, "logs");
 const DEFAULT_SETTINGS: Settings = {
   model: "",
   api: "",
+  auth: {
+    mode: "api-key",
+    oauthCredentialsPath: "~/.claude/.credentials.json",
+  },
   fallback: {
     model: "",
     api: "",
