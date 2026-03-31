@@ -6,7 +6,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { transcribeAudioToText } from "../whisper";
-import { resolveSkillPrompt, listSkills } from "../skills";
+import { resolveSkillPrompt, listSkills, listSkillsWithMetadata, formatSkillsList } from "../skills";
 import { mkdir } from "node:fs/promises";
 import { extname, join } from "node:path";
 
@@ -610,6 +610,17 @@ async function handleMessage(message: TelegramMessage): Promise<void> {
     return;
   }
 
+  if (command === "/skills") {
+    try {
+      const skills = await listSkillsWithMetadata();
+      const text = formatSkillsList(skills);
+      await sendMessage(config.token, chatId, text, threadId);
+    } catch (err) {
+      await sendMessage(config.token, chatId, `Failed to list skills: ${err instanceof Error ? err.message : err}`, threadId);
+    }
+    return;
+  }
+
   // Secretary: detect reply to a bot alert message → treat as custom reply
   const replyToMsgId = message.reply_to_message?.message_id;
   if (replyToMsgId && text && botId && message.reply_to_message?.from?.id === botId) {
@@ -796,6 +807,7 @@ async function registerBotCommands(token: string): Promise<void> {
       { command: "compact", description: "Compact session to reduce context size" },
       { command: "status", description: "Show current session status" },
       { command: "context", description: "Show context window usage" },
+      { command: "skills", description: "List all available skills" },
     ];
     for (const skill of skills) {
       // Telegram commands: 1-32 chars, lowercase a-z, 0-9, underscores only

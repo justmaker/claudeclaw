@@ -1,10 +1,14 @@
 import { htmlPage } from "./page/html";
+import { dashboardPage } from "./page/dashboard";
 import { clampInt, json } from "./http";
 import type { StartWebUiOptions, WebServerHandle } from "./types";
 import { buildState, buildTechnicalInfo, sanitizeSettings } from "./services/state";
 import { readHeartbeatSettings, updateHeartbeatSettings } from "./services/settings";
 import { createQuickJob, deleteJob } from "./services/jobs";
 import { readLogs } from "./services/logs";
+import { getMetricsSummary } from "../metrics";
+import { getQueueManager } from "../queue-manager";
+import { peekSession } from "../sessions";
 
 export function startWebUi(opts: StartWebUiOptions): WebServerHandle {
   const server = Bun.serve({
@@ -146,6 +150,64 @@ export function startWebUi(opts: StartWebUiOptions): WebServerHandle {
       if (url.pathname === "/api/logs") {
         const tail = clampInt(url.searchParams.get("tail"), 200, 20, 2000);
         return json(await readLogs(tail));
+      }
+
+      // --- Dashboard & new API endpoints (#13) ---
+
+      if (url.pathname === "/dashboard" || url.pathname === "/dashboard/") {
+        return new Response(dashboardPage(), {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
+
+      if (url.pathname === "/api/status") {
+        const snap = opts.getSnapshot();
+        const now = Date.now();
+        const session = await peekSession();
+        return json({
+          ok: true,
+          uptime_ms: now - snap.startedAt,
+          started_at: snap.startedAt,
+          pid: snap.pid,
+          model: snap.settings.model ?? null,
+          session_count: session ? 1 : 0,
+          heartbeat_enabled: snap.settings.heartbeat.enabled,
+        });
+      }
+
+      if (url.pathname === "/api/sessions") {
+        const snap = opts.getSnapshot();
+        const session = await peekSession();
+        const sessions = session
+          ? [
+              {
+                session_id_short: session.sessionId.slice(0, 8),
+                created_at: session.createdAt,
+                last_used_at: session.lastUsedAt,
+                turn_count: session.turnCount,
+              },
+            ]
+          : [];
+        return json({ ok: true, sessions, total: sessions.length });
+      }
+
+      if (url.pathname === "/api/metrics") {
+        const days = clampInt(url.searchParams.get("days"), 7, 1, 90);
+        try {
+          const summary = await getMetricsSummary(days);
+          return json({ ok: true, ...summary });
+        } catch {
+          return json({ ok: true, period_days: days, total_sessions: 0, total_input_tokens: 0, total_output_tokens: 0, success_count: 0, failure_count: 0, success_rate: "0.00%", avg_duration_ms: 0, by_source: {}, by_model: {} });
+        }
+      }
+
+      if (url.pathname === "/api/queue") {
+        const qm = getQueueManager();
+        return json({
+          ok: true,
+          running: qm.runningCount,
+          queued: qm.queuedCount,
+        });
       }
 
       return new Response("Not found", { status: 404 });

@@ -375,9 +375,21 @@ Model 檔案首次使用時自動從 HuggingFace 下載。中文建議：`localM
 
 ---
 
+### Web Dashboard API
+
+Dashboard 提供即時監控頁面與 RESTful API：
+
+- **`/dashboard`** — 即時監控儀表板（自動每 10 秒刷新）
+- **`GET /api/status`** — 服務狀態（uptime、PID、model、session count）
+- **`GET /api/sessions`** — 當前 session 列表
+- **`GET /api/metrics?days=7`** — Metrics 摘要（token 用量、成功率）
+- **`GET /api/queue`** — Queue 狀態（running/queued 數量）
+
+---
+
 ### Skill System
 
-載入 workspace 目錄下的 skills，擴展 agent 能力。
+載入 workspace 目錄下的 skills，擴展 agent 能力。支援 metadata、keyword 匹配、優先級排序。
 
 ```json
 {
@@ -388,6 +400,37 @@ Model 檔案首次使用時自動從 HuggingFace 下載。中文建議：`localM
 ```
 
 Workspace 遵循 OpenClaw 慣例：根目錄放 `AGENTS.md`、`SOUL.md`、`TOOLS.md`、`KNOWLEDGE.md`，`skills/` 目錄放各 skill 的 `SKILL.md`。啟動時自動載入並注入 prompt。
+
+#### Skill 格式
+
+每個 skill 放在 `skills/<name>/SKILL.md`，使用 YAML frontmatter：
+
+```markdown
+---
+name: my-skill
+description: 什麼時候觸發這個 skill
+keywords:
+  - keyword1
+  - keyword2
+examples:
+  - "example trigger phrase"
+priority: 100
+---
+
+# Skill Title
+
+Instructions here.
+```
+
+- **keywords**：用於智慧匹配，不只靠 command name
+- **examples**：觸發範例，提高匹配準確度
+- **priority**：數字越小優先級越高（預設 100）
+
+參考 `skills/TEMPLATE.md` 了解完整格式。
+
+#### `/skills` 指令
+
+在 Telegram 或 Discord 輸入 `/skills`，列出所有可用 skills 及其描述、觸發關鍵字。
 
 ---
 

@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { transcribeAudioToText } from "../whisper";
-import { resolveSkillPrompt } from "../skills";
+import { resolveSkillPrompt, listSkillsWithMetadata, formatSkillsList } from "../skills";
 import { getMetricsSummary } from "../metrics";
 import { mkdir } from "node:fs/promises";
 import { extname, join } from "node:path";
@@ -332,6 +332,11 @@ async function registerSlashCommands(token: string): Promise<void> {
     {
       name: "metrics",
       description: "Show session metrics summary (last 7 days)",
+      type: 1,
+    },
+    {
+      name: "skills",
+      description: "List all available skills",
       type: 1,
     },
   ];
@@ -771,6 +776,19 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
       } catch (err) {
         await respondToInteraction(interaction, {
           content: `Failed to load metrics: ${err instanceof Error ? err.message : err}`,
+        });
+      }
+      return;
+    }
+
+    if (interaction.data.name === "skills") {
+      try {
+        const skills = await listSkillsWithMetadata();
+        const text = formatSkillsList(skills);
+        await respondToInteraction(interaction, { content: text.slice(0, 2000) });
+      } catch (err) {
+        await respondToInteraction(interaction, {
+          content: `Failed to list skills: ${err instanceof Error ? err.message : err}`,
         });
       }
       return;
