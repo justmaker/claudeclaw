@@ -20,7 +20,6 @@ export interface ContextUsage {
 
 /**
  * Resolve the JSONL path for a Claude Code session.
- * Claude Code stores session data at ~/.claude/projects/-/{sessionId}.jsonl
  */
 function getSessionJsonlPath(sessionId: string): string {
   return join(homedir(), ".claude", "projects", "-", `${sessionId}.jsonl`);
@@ -28,64 +27,55 @@ function getSessionJsonlPath(sessionId: string): string {
 
 /**
  * Read the last assistant message with usage data from a session JSONL.
- * Reads the file in reverse to find the most recent usage entry efficiently.
  */
 export async function getContextUsage(sessionId: string): Promise<ContextUsage | null> {
   const jsonlPath = getSessionJsonlPath(sessionId);
   if (!existsSync(jsonlPath)) return null;
 
   try {
-    const content = await readFile(jsonlPath, "utf8");
-    const lines = content.trim().split("\n");
+    const content = await readFile(jsonlPath, "utf-8");
+    const lines = content.trim().split("\n").reverse();
 
-    // Scan from the end to find the last line with real usage data
-    for (let i = lines.length - 1; i >= 0; i--) {
+    for (const line of lines) {
       try {
-        const entry = JSON.parse(lines[i]);
-        const usage = entry?.message?.usage;
-        if (!usage) continue;
-
-        const inputTokens = usage.input_tokens ?? 0;
-        const cacheCreationTokens = usage.cache_creation_input_tokens ?? 0;
-        const cacheReadTokens = usage.cache_read_input_tokens ?? 0;
-        const outputTokens = usage.output_tokens ?? 0;
-
-        // Skip synthetic/empty entries
-        const totalTokens = inputTokens + cacheCreationTokens + cacheReadTokens + outputTokens;
-        if (totalTokens === 0) continue;
-
-        const usagePercent = totalTokens / MAX_CONTEXT_TOKENS;
-
-        return {
-          inputTokens,
-          cacheCreationTokens,
-          cacheReadTokens,
-          outputTokens,
-          totalTokens,
-          usagePercent,
-        };
+        const entry = JSON.parse(line);
+        if (entry.type === "assistant" && entry.usage) {
+          const u = entry.usage;
+          const inputTokens = u.input_tokens ?? 0;
+          const cacheCreation = u.cache_creation_input_tokens ?? 0;
+          const cacheRead = u.cache_read_input_tokens ?? 0;
+          const outputTokens = u.output_tokens ?? 0;
+          const totalTokens = inputTokens + cacheCreation + cacheRead + outputTokens;
+          return {
+            inputTokens,
+            cacheCreationTokens: cacheCreation,
+            cacheReadTokens: cacheRead,
+            outputTokens,
+            totalTokens,
+            usagePercent: (totalTokens / MAX_CONTEXT_TOKENS) * 100,
+          };
+        }
       } catch {
-        // Skip unparseable lines
         continue;
       }
     }
-
-    return null;
   } catch {
     return null;
   }
+
+  return null;
 }
 
 /**
- * Determine whether auto-compact should run for a session.
+ * Check if context usage exceeds the auto-compact threshold.
  */
 export async function shouldAutoCompact(
   sessionId: string,
-  threshold: number = DEFAULT_THRESHOLD
+  threshold = DEFAULT_THRESHOLD
 ): Promise<boolean> {
   const usage = await getContextUsage(sessionId);
   if (!usage) return false;
-  return usage.usagePercent >= threshold;
+  return usage.usagePercent >= threshold * 100;
 }
 
 export { MAX_CONTEXT_TOKENS, DEFAULT_THRESHOLD };

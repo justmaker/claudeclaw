@@ -6,7 +6,7 @@ import { writeState, type StateData } from "../statusline";
 import { cronMatches, nextCronMatch } from "../cron";
 import { clearJobSchedule, loadJobs } from "../jobs";
 import { writePidFile, cleanupPidFile, checkExistingDaemon } from "../pid";
-import { initConfig, loadSettings, reloadSettings, resolvePrompt, type HeartbeatConfig, type Settings } from "../config";
+import { initConfig, loadSettings, reloadSettings, resolvePrompt, type HeartbeatConfig, type Settings, startSettingsWatcher, onSettingsChange } from "../config";
 import { getDayAndMinuteAtOffset } from "../timezone";
 import { startWebUi, type WebServerHandle } from "../web";
 import type { Job } from "../jobs";
@@ -451,6 +451,18 @@ export async function start(args: string[] = []) {
             currentSettings.heartbeat.prompt = patch.prompt;
             changed = true;
           }
+          if (typeof patch.model === "string" && currentSettings.heartbeat.model !== patch.model) {
+            currentSettings.heartbeat.model = patch.model;
+            changed = true;
+          }
+          if (typeof patch.forwardToDiscord === "boolean" && currentSettings.heartbeat.forwardToDiscord !== patch.forwardToDiscord) {
+            currentSettings.heartbeat.forwardToDiscord = patch.forwardToDiscord;
+            changed = true;
+          }
+          if (typeof patch.forwardToTelegram === "boolean" && currentSettings.heartbeat.forwardToTelegram !== patch.forwardToTelegram) {
+            currentSettings.heartbeat.forwardToTelegram = patch.forwardToTelegram;
+            changed = true;
+          }
           if (Array.isArray(patch.excludeWindows)) {
             const prev = JSON.stringify(currentSettings.heartbeat.excludeWindows);
             const next = JSON.stringify(patch.excludeWindows);
@@ -616,6 +628,32 @@ export async function start(args: string[] = []) {
 
   if (currentSettings.heartbeat.enabled) scheduleHeartbeat();
 
+  // --- Event-driven settings watcher (debounced fs.watch) ---
+  startSettingsWatcher(currentSettings);
+  onSettingsChange((newSettings, _oldSettings) => {
+    const hbChanged =
+      newSettings.heartbeat.enabled !== currentSettings.heartbeat.enabled ||
+      newSettings.heartbeat.interval !== currentSettings.heartbeat.interval ||
+      (newSettings.heartbeat as any).model !== (currentSettings.heartbeat as any).model ||
+      newSettings.heartbeat.prompt !== currentSettings.heartbeat.prompt ||
+      newSettings.heartbeat.forwardToTelegram !== currentSettings.heartbeat.forwardToTelegram ||
+      newSettings.timezoneOffsetMinutes !== currentSettings.timezoneOffsetMinutes ||
+      newSettings.timezone !== currentSettings.timezone ||
+      JSON.stringify(newSettings.heartbeat.excludeWindows) !== JSON.stringify(currentSettings.heartbeat.excludeWindows);
+
+    if (hbChanged) {
+      console.log(`[${ts()}] [settings-watcher] Heartbeat config changed — rescheduling`);
+      currentSettings = newSettings;
+      scheduleHeartbeat();
+    } else {
+      currentSettings = newSettings;
+    }
+    if (web) {
+      currentSettings.web.enabled = true;
+      currentSettings.web.port = web.port;
+    }
+  });
+
   // --- Hot-reload loop (every 30s) ---
   setInterval(async () => {
     try {
@@ -626,7 +664,10 @@ export async function start(args: string[] = []) {
       const hbChanged =
         newSettings.heartbeat.enabled !== currentSettings.heartbeat.enabled ||
         newSettings.heartbeat.interval !== currentSettings.heartbeat.interval ||
+        newSettings.heartbeat.model !== currentSettings.heartbeat.model ||
         newSettings.heartbeat.prompt !== currentSettings.heartbeat.prompt ||
+        newSettings.heartbeat.forwardToDiscord !== currentSettings.heartbeat.forwardToDiscord ||
+        newSettings.heartbeat.forwardToTelegram !== currentSettings.heartbeat.forwardToTelegram ||
         newSettings.timezoneOffsetMinutes !== currentSettings.timezoneOffsetMinutes ||
         newSettings.timezone !== currentSettings.timezone ||
         JSON.stringify(newSettings.heartbeat.excludeWindows) !== JSON.stringify(currentSettings.heartbeat.excludeWindows);
