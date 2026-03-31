@@ -94,6 +94,54 @@ See [docs/MULTI_SESSION.md](docs/MULTI_SESSION.md) for technical details.
 - **Security Levels:** Four access levels from read-only to full system access.
 - **Model Selection:** Switch models based on your workload.
 
+## Structured Logging
+
+ClaudeClaw uses a unified structured logger (`src/logger.ts`). All log output goes to:
+
+1. **stdout** — human-readable format with timestamp and source tag (for `journalctl`)
+2. **`/tmp/claudeclaw-structured.log`** — one JSON object per line (NDJSON)
+
+### Log Entry Format
+
+```json
+{
+  "timestamp": "2026-03-31T13:51:00.000Z",
+  "level": "info",
+  "source": "discord",
+  "message": "Session created: abc123",
+  "meta": { "session_id": "abc123", "user": "rex" }
+}
+```
+
+### jq Query Examples
+
+```bash
+# 所有 error level 的 log
+cat /tmp/claudeclaw-structured.log | jq 'select(.level == "error")'
+
+# 只看 Discord 來源
+cat /tmp/claudeclaw-structured.log | jq 'select(.source == "discord")'
+
+# 最近 10 筆 log
+tail -10 /tmp/claudeclaw-structured.log | jq .
+
+# 搜尋特定 session
+cat /tmp/claudeclaw-structured.log | jq 'select(.meta.session_id == "abc123")'
+
+# 統計各 level 數量
+cat /tmp/claudeclaw-structured.log | jq -s 'group_by(.level) | map({level: .[0].level, count: length})'
+```
+
+### Usage in Code
+
+```typescript
+import { createLogger } from "./logger";
+const logger = createLogger("discord");
+
+logger.info("Bot started");
+logger.error("Connection failed", { error: "timeout", retry: 3 });
+```
+
 ## FAQ
 
 <details open>
