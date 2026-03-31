@@ -9,6 +9,7 @@ import {
   markThreadCompactWarned,
 } from "./sessionManager";
 import { getSettings, type ModelConfig, type SecurityConfig, loadWorkspacePrompts, loadWorkspaceSkills } from "./config";
+import { selectToken, recordUsage, isRateLimited, type TokenPoolConfig } from "./token-pool";
 import { buildClockPromptPrefix } from "./timezone";
 import { selectModel } from "./model-router";
 
@@ -379,7 +380,13 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
   const logFile = join(LOGS_DIR, `${name}-${timestamp}.log`);
 
   const settings = getSettings();
-  const { security, model, api, fallback, agentic } = settings;
+  const { security, model, api, fallback, agentic, tokenPool, tokenStrategy } = settings;
+
+  // Token Pool 設定：有 tokenPool 時優先使用 pool 機制
+  const hasTokenPool = tokenPool.length > 0;
+  const poolConfig: TokenPoolConfig | null = hasTokenPool
+    ? { pool: tokenPool, strategy: tokenStrategy }
+    : null;
 
   // Determine which model to use based on agentic routing
   let primaryConfig: ModelConfig;
@@ -396,6 +403,20 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
     );
   } else {
     primaryConfig = { model, api };
+  }
+
+  // Token Pool: 覆蓋 primary 選擇（round-robin / least-used 需要從 pool 選）
+  if (poolConfig && (tokenStrategy === "round-robin" || tokenStrategy === "least-used")) {
+    const poolPick = selectToken(poolConfig);
+    if (poolPick) {
+      primaryConfig = { model: poolPick.model, api: poolPick.api };
+    }
+  } else if (poolConfig && tokenStrategy === "fallback-chain") {
+    // fallback-chain: 用 priority 最高（最小）的
+    const poolPick = selectToken(poolConfig);
+    if (poolPick) {
+      primaryConfig = { model: poolPick.model, api: poolPick.api };
+    }
   }
 
   const fallbackConfig: ModelConfig = {
@@ -458,12 +479,48 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
   const primaryRateLimit = extractRateLimitMessage(exec.rawStdout, exec.stderr);
   let usedFallback = false;
 
-  if (primaryRateLimit && hasModelConfig(fallbackConfig) && !sameModelConfig(primaryConfig, fallbackConfig)) {
-    console.warn(
-      `[${new Date().toLocaleTimeString()}] Claude limit reached; retrying with fallback${fallbackConfig.model ? ` (${fallbackConfig.model})` : ""}...`
+  if (primaryRateLimit) {
+    if (poolConfig) {
+      // Token Pool 模式：遍歷 pool 中的 entries
+      const excluded = new Set<string>();
+      // 排除剛失敗的 primary（如果它在 pool 裡的話）
+      const primaryKey = tokenPool.find(
+        (e) => e.model === primaryConfig.model && e.api === primaryConfig.api
+      );
+      if (primaryKey) excluded.add(primaryKey.name || primaryKey.api);
+
+      let poolSuccess = false;
+      while (!poolSuccess) {
+        const next = selectToken(poolConfig, excluded);
+        if (!next) break; // 全部用完
+        console.warn(
+          `[${new Date().toLocaleTimeString()}] Token pool: 切換到 "${next.name || "unnamed"}" (${next.model})...`
+        );
+        exec = await runClaudeOnce(args, next.model, next.api, baseEnv, timeoutMs);
+        recordUsage(next);
+        if (isRateLimited(exec.rawStdout, exec.stderr)) {
+          excluded.add(next.name || next.api);
+          continue;
+        }
+        poolSuccess = true;
+        usedFallback = true;
+      }
+    } else if (hasModelConfig(fallbackConfig) && !sameModelConfig(primaryConfig, fallbackConfig)) {
+      // 舊版單一 fallback 模式（向後相容）
+      console.warn(
+        `[${new Date().toLocaleTimeString()}] Claude limit reached; retrying with fallback${fallbackConfig.model ? ` (${fallbackConfig.model})` : ""}...`
+      );
+      exec = await runClaudeOnce(args, fallbackConfig.model, fallbackConfig.api, baseEnv, timeoutMs);
+      usedFallback = true;
+    }
+  }
+
+  // Token Pool: 記錄 primary 的使用（成功時）
+  if (poolConfig && !primaryRateLimit) {
+    const primaryEntry = tokenPool.find(
+      (e) => e.model === primaryConfig.model && e.api === primaryConfig.api
     );
-    exec = await runClaudeOnce(args, fallbackConfig.model, fallbackConfig.api, baseEnv, timeoutMs);
-    usedFallback = true;
+    if (primaryEntry) recordUsage(primaryEntry);
   }
 
   const rawStdout = exec.rawStdout;

@@ -142,6 +142,39 @@ logger.info("Bot started");
 logger.error("Connection failed", { error: "timeout", retry: 3 });
 ```
 
+## Token Pool（多帳號輪轉）
+
+團隊有多個 Claude 帳號時，可設定 token pool 自動輪轉和 rate limit 切換。
+
+在 `settings.json` 新增 `tokenPool` 和 `tokenStrategy`：
+
+```json
+{
+  "tokenPool": [
+    { "name": "rex", "model": "opus", "api": "sk-ant-xxx1", "priority": 1 },
+    { "name": "alice", "model": "opus", "api": "sk-ant-xxx2", "priority": 2 },
+    { "name": "bob", "model": "sonnet", "api": "sk-ant-xxx3", "priority": 3 }
+  ],
+  "tokenStrategy": "fallback-chain"
+}
+```
+
+### 策略
+
+| 策略 | 說明 |
+|------|------|
+| `fallback-chain` | 按 `priority` 順序使用，遇到 rate limit 自動切換下一個（預設） |
+| `round-robin` | 每次請求輪流使用不同帳號 |
+| `least-used` | 追蹤使用次數，每次挑使用最少的帳號 |
+
+### 向後相容
+
+沒有設定 `tokenPool` 時，仍使用原本的 `api` + `fallback` 機制，完全不受影響。
+
+### Rate Limit 偵測
+
+自動檢查 Claude 輸出中的 "you've hit your limit" 或 "out of extra usage" 訊息，觸發切換。
+
 ## STT / 語音辨識設定
 
 ClaudeClaw 支援語音訊息轉文字，可透過本機 whisper.cpp 或遠端 API 兩種模式。
