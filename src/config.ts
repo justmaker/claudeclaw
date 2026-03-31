@@ -3,6 +3,7 @@ import { mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import { normalizeTimezoneName, resolveTimezoneOffsetMinutes } from "./timezone";
 import { type TokenPoolEntry, type TokenStrategy, parseTokenPoolConfig, type TokenPoolConfig } from "./token-pool";
+import type { CronJob } from "./cron-scheduler";
 
 const HEARTBEAT_DIR = join(process.cwd(), ".claude", "claudeclaw");
 const SETTINGS_FILE = join(HEARTBEAT_DIR, "settings.json");
@@ -66,6 +67,7 @@ const DEFAULT_SETTINGS: Settings = {
   telegram: { token: "", allowedUserIds: [] },
   discord: { token: "", allowedUserIds: [], listenChannels: [] },
   security: { level: "moderate", allowedTools: [], disallowedTools: [] },
+  cron: [],
   web: { enabled: false, host: "127.0.0.1", port: 4632 },
   stt: { baseUrl: "", model: "", localModel: "large-v3", language: "", initialPrompt: "" },
   workspace: { path: "" },
@@ -127,6 +129,7 @@ export interface Settings {
   timezone: string;
   timezoneOffsetMinutes: number;
   heartbeat: HeartbeatConfig;
+  cron: CronJob[];
   telegram: TelegramConfig;
   discord: DiscordConfig;
   security: SecurityConfig;
@@ -258,6 +261,25 @@ function parseAgenticConfig(raw: any): AgenticConfig {
   };
 }
 
+function parseCronJobs(raw: unknown): CronJob[] {
+  if (!Array.isArray(raw)) return [];
+  const jobs: CronJob[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    const cron = typeof entry.cron === "string" ? entry.cron.trim() : "";
+    if (!name || !cron) continue;
+    const prompt = typeof entry.prompt === "string" ? entry.prompt.trim() : "";
+    const model = typeof entry.model === "string" ? entry.model.trim() : undefined;
+    const target = (["telegram", "discord", "both"] as const).includes(entry.target)
+      ? entry.target as "telegram" | "discord" | "both"
+      : undefined;
+    const enabled = entry.enabled !== false;
+    jobs.push({ name, cron, prompt, model, target, enabled });
+  }
+  return jobs;
+}
+
 function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string[]): Settings {
   const rawLevel = raw.security?.level;
   const level: SecurityLevel =
@@ -301,6 +323,7 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
       excludeWindows: parseExcludeWindows(raw.heartbeat?.excludeWindows),
       forwardToTelegram: raw.heartbeat?.forwardToTelegram ?? false,
     },
+    cron: parseCronJobs(raw.cron),
     telegram: {
       token: raw.telegram?.token ?? "",
       allowedUserIds: raw.telegram?.allowedUserIds ?? [],

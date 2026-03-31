@@ -339,6 +339,29 @@ async function registerSlashCommands(token: string): Promise<void> {
       description: "List all available skills",
       type: 1,
     },
+    {
+      name: "cron",
+      description: "List cron jobs or enable/disable a job",
+      type: 1,
+      options: [
+        {
+          name: "action",
+          description: "enable or disable a job",
+          type: 3,
+          required: false,
+          choices: [
+            { name: "enable", value: "enable" },
+            { name: "disable", value: "disable" },
+          ],
+        },
+        {
+          name: "job",
+          description: "Job name to enable/disable",
+          type: 3,
+          required: false,
+        },
+      ],
+    },
   ];
 
   await discordApi(
@@ -791,6 +814,51 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
           content: `Failed to list skills: ${err instanceof Error ? err.message : err}`,
         });
       }
+      return;
+    }
+
+    if (interaction.data.name === "cron") {
+      const { getCronScheduler } = await import("../cron-scheduler");
+      const scheduler = getCronScheduler();
+      if (!scheduler) {
+        await respondToInteraction(interaction, { content: "⏰ Cron scheduler not running." });
+        return;
+      }
+
+      const options = interaction.data.options ?? [];
+      const actionOpt = options.find((o: any) => o.name === "action");
+      const jobOpt = options.find((o: any) => o.name === "job");
+
+      if (actionOpt && jobOpt) {
+        const action = actionOpt.value as string;
+        const jobName = jobOpt.value as string;
+        const success = scheduler.setEnabled(jobName, action === "enable");
+        if (success) {
+          await respondToInteraction(interaction, {
+            content: `⏰ Job \`${jobName}\` ${action === "enable" ? "enabled ✅" : "disabled ⏸️"}`,
+          });
+        } else {
+          await respondToInteraction(interaction, {
+            content: `❌ Job \`${jobName}\` not found.`,
+          });
+        }
+        return;
+      }
+
+      const statuses = scheduler.getStatus();
+      if (statuses.length === 0) {
+        await respondToInteraction(interaction, { content: "⏰ No cron jobs configured." });
+        return;
+      }
+
+      const lines = ["⏰ **Cron Jobs**", ""];
+      for (const s of statuses) {
+        const status = s.enabled !== false ? "✅" : "⏸️";
+        const next = s.enabled !== false ? ` → next: ${s.nextAt.toLocaleString()}` : "";
+        const target = s.target ? ` [${s.target}]` : "";
+        lines.push(`${status} **${s.name}** \`${s.cron}\`${target}${next}`);
+      }
+      await respondToInteraction(interaction, { content: lines.join("\n").slice(0, 2000) });
       return;
     }
 
