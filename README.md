@@ -633,6 +633,41 @@ curl -X GET 'http://localhost:8080/v1/qrcodelink?device_name=claudeclaw' --outpu
 使用 [Baileys](https://github.com/WhiskeySockets/Baileys)。首次啟動顯示 QR Code，掃描連結手機。
 支援：文字、圖片、語音（Whisper）、文件、Reaction。
 
+### Memory Semantic Search
+
+用本機 embedding 模型（Ollama）或 TF-IDF fallback 建立 memory 語義搜尋，超越 claude-mem plugin 的簡單關鍵字比對。
+
+**設定範例：**
+```json
+{
+  "memory": {
+    "enabled": true,
+    "dirs": ["~/.claude/claudeclaw/workspace"],
+    "embeddingProvider": "ollama",
+    "embeddingModel": "nomic-embed-text",
+    "ollamaUrl": "http://localhost:11434",
+    "autoIndex": true,
+    "indexIntervalMs": 3600000
+  }
+}
+```
+
+**Slash Commands（Discord / Telegram）：**
+
+| 命令 | 說明 |
+|------|------|
+| `/memory search <查詢>` | 語義搜尋 memory，回傳最相關的 chunks |
+| `/memory reindex` | 重建全部索引 |
+| `/memory status` | 顯示索引狀態（chunk 數、最後索引時間、provider）|
+
+**Embedding Backend：**
+- **Ollama**（優先）：使用 `nomic-embed-text` 模型產生高品質向量，需本機執行 Ollama
+- **TF-IDF**（fallback）：Ollama 不可用時自動切換，零依賴，即開即用
+
+**自動 Context 注入：** 每次 AI 回答前，自動用使用者問題做 memory search，將相關 chunks 注入 `<memory-context>` block（可透過 `getMemoryContext()` API 呼叫）。
+
+---
+
 ### Cron Scheduler
 
 通用 cron 排程系統，支援 cron expression 定時執行 prompt，獨立於 heartbeat 運作。
