@@ -11,6 +11,7 @@ import { transcribeAudioToText } from "../whisper";
 import { synthesize, sendDiscordVoice, shouldSynthesizeVoice, parseVoiceCommand } from "../tts";
 import { resolveSkillPrompt, listSkillsWithMetadata, formatSkillsList } from "../skills";
 import { listSubagents, killSubagent } from "../subagent";
+import { listAgents, spawnAgent, listSessions as listACPSessions, killSession as killACPSession } from "../acp";
 import { getMetricsSummary } from "../metrics";
 import { mkdir } from "node:fs/promises";
 import { extname, join } from "node:path";
@@ -57,6 +58,7 @@ interface DiscordInteraction {
   data?: {
     name?: string;
     custom_id?: string;
+    options?: Array<{ name: string; value: any }>;
   };
   channel_id?: string;
   guild_id?: string;
@@ -367,6 +369,20 @@ async function registerSlashCommands(token: string): Promise<void> {
       ],
     },
     {
+      name: "agents",
+      description: "List available ACP agents and their status",
+      type: 1,
+    },
+    {
+      name: "agent",
+      description: "Run a task with a specific agent",
+      type: 1,
+      options: [
+        { name: "id", description: "Agent ID (claude, codex, gemini, opencode)", type: 3, required: true },
+        { name: "prompt", description: "Task prompt to send to the agent", type: 3, required: true },
+      ],
+    },
+    {
       name: "cron",
       description: "List cron jobs or enable/disable a job",
       type: 1,
@@ -384,6 +400,69 @@ async function registerSlashCommands(token: string): Promise<void> {
         {
           name: "job",
           description: "Job name to enable/disable",
+          type: 3,
+          required: false,
+        },
+      ],
+    },
+    {
+      name: "browser",
+      description: "Browser control — screenshot or status",
+      type: 1,
+      options: [
+        {
+          name: "action",
+          description: "Action to perform",
+          type: 3,
+          required: true,
+          choices: [
+            { name: "screenshot", value: "screenshot" },
+            { name: "status", value: "status" },
+          ],
+        },
+        {
+          name: "url",
+          description: "URL to screenshot",
+          type: 3,
+          required: false,
+        },
+      ],
+    },
+    {
+      name: "pair",
+      description: "生成裝置配對碼，讓手機或電腦配對到 ClaudeClaw",
+      type: 1,
+    },
+    {
+      name: "nodes",
+      description: "列出已配對的裝置",
+      type: 1,
+    },
+    {
+      name: "node",
+      description: "對已配對裝置執行動作",
+      type: 1,
+      options: [
+        {
+          name: "device",
+          description: "裝置 ID 或名稱",
+          type: 3,
+          required: true,
+        },
+        {
+          name: "action",
+          description: "要執行的動作",
+          type: 3,
+          required: true,
+          choices: [
+            { name: "screenshot", value: "screenshot" },
+            { name: "clipboard", value: "clipboard" },
+            { name: "notify", value: "notify" },
+          ],
+        },
+        {
+          name: "args",
+          description: "額外參數（如 notify 的訊息內容）",
           type: 3,
           required: false,
         },
@@ -598,6 +677,15 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
     if (cleanContent.trim().toLowerCase() === "/mcp") {
       const { formatMCPStatus } = await import("../mcp-client");
       await sendMessage(config.token, channelId, formatMCPStatus());
+      return;
+    }
+
+    // /memory command
+    if (cleanContent.trim().toLowerCase().startsWith("/memory")) {
+      const { handleMemoryCommand } = await import("../memory");
+      const args = cleanContent.trim().slice("/memory".length).trim();
+      const reply = await handleMemoryCommand(args);
+      await sendMessage(config.token, channelId, reply);
       return;
     }
 
@@ -919,6 +1007,63 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
       return;
     }
 
+    if (interaction.data.name === "agents") {
+      try {
+        const agents = await listAgents();
+        if (agents.length === 0) {
+          await respondToInteraction(interaction, { content: "📭 沒有設定任何 agent。" });
+          return;
+        }
+        const lines = agents.map((a) => {
+          const emoji = a.available ? "✅" : "❌";
+          return `${emoji} \`${a.id}\` — \`${a.command}\` ${a.available ? "(可用)" : "(未安裝)"}`;
+        });
+        await respondToInteraction(interaction, {
+          content: `🤖 **ACP Agents (${agents.length})**\n${lines.join("\n")}`,
+        });
+      } catch (err) {
+        await respondToInteraction(interaction, {
+          content: `❌ ${err instanceof Error ? err.message : err}`,
+        });
+      }
+      return;
+    }
+
+    if (interaction.data.name === "agent") {
+      const agentId = interaction.data.options?.find((o: any) => o.name === "id")?.value as string;
+      const prompt = interaction.data.options?.find((o: any) => o.name === "prompt")?.value as string;
+      if (!agentId || !prompt) {
+        await respondToInteraction(interaction, { content: "❌ 需要指定 agent ID 和 prompt。" });
+        return;
+      }
+      await respondToInteraction(interaction, { content: `⏳ 正在用 \`${agentId}\` 執行任務...` });
+      try {
+        const result = await spawnAgent(agentId, prompt);
+        const statusEmoji = result.status === "completed" ? "✅" : "❌";
+        const output = result.stdout.slice(0, 1800) || result.stderr.slice(0, 500) || "(no output)";
+        await fetch(
+          `${DISCORD_API}/webhooks/${applicationId}/${interaction.token}/messages/@original`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: `${statusEmoji} **${agentId}** (${(result.durationMs / 1000).toFixed(1)}s)\n\`\`\`\n${output}\n\`\`\``,
+            }),
+          },
+        );
+      } catch (err) {
+        await fetch(
+          `${DISCORD_API}/webhooks/${applicationId}/${interaction.token}/messages/@original`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: `❌ ${err instanceof Error ? err.message : err}` }),
+          },
+        );
+      }
+      return;
+    }
+
     if (interaction.data.name === "cron") {
       const { getCronScheduler } = await import("../cron-scheduler");
       const scheduler = getCronScheduler();
@@ -962,6 +1107,164 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
         lines.push(`${status} **${s.name}** \`${s.cron}\`${target}${next}`);
       }
       await respondToInteraction(interaction, { content: lines.join("\n").slice(0, 2000) });
+      return;
+    }
+
+    if (interaction.data.name === "browser") {
+      const { BrowserManager } = await import("../browser");
+      const { getSettings } = await import("../config");
+      const action = interaction.data.options?.find((o: any) => o.name === "action")?.value ?? "status";
+      const url = interaction.data.options?.find((o: any) => o.name === "url")?.value;
+
+      if (action === "status") {
+        const mgr = BrowserManager.getInstance(getSettings().browser);
+        await respondToInteraction(interaction, {
+          content: mgr.isRunning
+            ? `🌐 瀏覽器運行中\n📍 ${mgr.currentUrl || "(no page)"}`
+            : "💤 瀏覽器未啟動",
+        });
+        return;
+      }
+
+      if (action === "screenshot") {
+        if (!url) {
+          await respondToInteraction(interaction, { content: "❌ 請提供 URL" });
+          return;
+        }
+        await respondToInteraction(interaction, { content: `📸 正在截圖 ${url} ...` });
+        try {
+          const mgr = BrowserManager.getInstance(getSettings().browser);
+          await mgr.navigate(url);
+          const buf = await mgr.screenshot();
+          // 上傳截圖作為 follow-up
+          const form = new FormData();
+          form.append("files[0]", new Blob([new Uint8Array(buf)], { type: "image/png" }), "screenshot.png");
+          form.append("payload_json", JSON.stringify({ content: `📸 ${url}` }));
+          await fetch(
+            `https://discord.com/api/v10/webhooks/${applicationId}/${interaction.token}/messages/@original`,
+            { method: "PATCH", body: form },
+          );
+        } catch (err: any) {
+          await fetch(
+            `https://discord.com/api/v10/webhooks/${applicationId}/${interaction.token}/messages/@original`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ content: `❌ 截圖失敗: ${err.message}` }),
+            },
+          );
+        }
+        return;
+      }
+    }
+
+    // /pair — 生成配對碼
+    if (interaction.data.name === "pair") {
+      const { getNodeHost } = await import("../node-host");
+      const { getSettings } = await import("../config");
+      const nodeHost = getNodeHost(getSettings().nodes.pairingTimeout);
+      const code = nodeHost.generatePairingCode();
+      const timeout = getSettings().nodes.pairingTimeout;
+      const port = getSettings().nodes.port;
+      await respondToInteraction(interaction, {
+        content: [
+          "📲 **Node 配對碼**",
+          "",
+          "```",
+          code,
+          "```",
+          "",
+          `在目標裝置上執行：`,
+          `\`node-client --host <此主機IP> --port ${port} --code ${code}\``,
+          "",
+          `⏱ 有效期：${timeout} 秒`,
+        ].join("\n"),
+      });
+      return;
+    }
+
+    // /nodes — 列出已配對裝置
+    if (interaction.data.name === "nodes") {
+      const { getNodeHost } = await import("../node-host");
+      const nodeHost = getNodeHost();
+      const devices = nodeHost.listDevices();
+      if (devices.length === 0) {
+        await respondToInteraction(interaction, { content: "📭 目前沒有已配對的裝置。使用 `/pair` 開始配對。" });
+        return;
+      }
+      const lines = ["📱 **已配對裝置**", ""];
+      for (const d of devices) {
+        const online = nodeHost.isOnline(d.id) ? "🟢" : "⚫";
+        lines.push(`${online} **${d.name}** (\`${d.id.slice(0, 8)}\`)`);
+        lines.push(`   平台: ${d.platform} | 最後上線: ${d.lastSeenAt.slice(0, 19).replace("T", " ")}`);
+      }
+      await respondToInteraction(interaction, { content: lines.join("\n") });
+      return;
+    }
+
+    // /node <device> <action> — 對裝置下指令
+    if (interaction.data.name === "node") {
+      const { getNodeHost } = await import("../node-host");
+      const nodeHost = getNodeHost();
+      const deviceArg = String((interaction.data as any).options?.find((o: any) => o.name === "device")?.value ?? "");
+      const action = String((interaction.data as any).options?.find((o: any) => o.name === "action")?.value ?? "");
+      const args = (interaction.data as any).options?.find((o: any) => o.name === "args")?.value;
+
+      const devices = nodeHost.listDevices();
+      const device = devices.find(d => d.id.startsWith(deviceArg) || d.name === deviceArg);
+      if (!device) {
+        await respondToInteraction(interaction, { content: `❌ 找不到裝置 \`${deviceArg}\`，使用 \`/nodes\` 查看已配對裝置。` });
+        return;
+      }
+      if (!nodeHost.isOnline(device.id)) {
+        await respondToInteraction(interaction, { content: `❌ 裝置 **${device.name}** 目前離線。` });
+        return;
+      }
+
+      await respondToInteraction(interaction, { content: `⏳ 正在對 **${device.name}** 執行 ${action}...` });
+      try {
+        if (action === "screenshot") {
+          const buf = await b64;
+          const bytes = Buffer.from(buf, "base64");
+          const form = new FormData();
+          form.append("files[0]", new Blob([bytes.buffer as ArrayBuffer], { type: "image/png" }), "screenshot.png");
+          form.append("payload_json", JSON.stringify({ content: `📸 **${device.name}** 截圖` }));
+          await fetch(
+            `https://discord.com/api/v10/webhooks/${applicationId}/${interaction.token}/messages/@original`,
+            { method: "PATCH", body: form },
+          );
+        } else if (action === "clipboard") {
+          const text = await nodeHost.clipboard(device.id);
+          await fetch(
+            `https://discord.com/api/v10/webhooks/${applicationId}/${interaction.token}/messages/@original`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ content: `📋 **${device.name}** 剪貼簿：\n\`\`\`\n${text.slice(0, 1800)}\n\`\`\`` }),
+            },
+          );
+        } else if (action === "notify") {
+          const msg = String(args ?? "來自 ClaudeClaw 的通知");
+          await nodeHost.notify(device.id, "ClaudeClaw", msg);
+          await fetch(
+            `https://discord.com/api/v10/webhooks/${applicationId}/${interaction.token}/messages/@original`,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ content: `🔔 已傳送通知給 **${device.name}**` }),
+            },
+          );
+        }
+      } catch (err: any) {
+        await fetch(
+          `https://discord.com/api/v10/webhooks/${applicationId}/${interaction.token}/messages/@original`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: `❌ 指令失敗: ${err.message}` }),
+          },
+        );
+      }
       return;
     }
 
