@@ -20,6 +20,7 @@ import { ProgressReporter, type ProgressCallback } from "./progress-reporter";
 import { recordMetrics } from "./metrics";
 import { StreamHandler } from "./stream-handler";
 import { BrowserManager } from "./browser";
+import { BrowserManager } from "./browser";
 
 const LOGS_DIR = join(process.cwd(), ".claude/claudeclaw/logs");
 // Resolve prompts relative to the claudeclaw installation, not the project dir
