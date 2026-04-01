@@ -7,6 +7,9 @@ import type { CronJob } from "./cron-scheduler";
 import type { ProvidersConfig } from "./providers/types";
 import { type MCPConfig, parseMCPConfig } from "./mcp-client";
 import { type TtsConfig, DEFAULT_TTS_CONFIG, parseTtsConfig } from "./tts";
+import { type BrowserConfig, DEFAULT_BROWSER_CONFIG, parseBrowserConfig } from "./browser";
+import { type MemorySettings, DEFAULT_MEMORY_SETTINGS } from "./memory";
+import type { ACPConfig } from "./acp";
 
 const HEARTBEAT_DIR = join(process.cwd(), ".claude", "claudeclaw");
 const SETTINGS_FILE = join(HEARTBEAT_DIR, "settings.json");
@@ -85,12 +88,31 @@ const DEFAULT_SETTINGS: Settings = {
     defaultModel: "sonnet",
     timeoutMs: 600000,
   },
+  acp: {
+    enabled: true,
+    agents: {
+      claude: { command: "claude", args: ["--print", "--output-format", "text"] },
+      codex: { command: "codex", args: [], needsPty: true },
+      gemini: { command: "gemini", args: [], needsPty: true },
+      opencode: { command: "opencode", args: [], needsPty: true },
+    },
+    defaultAgent: "claude",
+    maxConcurrent: 3,
+    timeoutMs: 600000,
+  },
   maxConcurrent: 3,
   streaming: {
     enabled: false,
     updateIntervalMs: 2000,
     minChunkChars: 50,
   },
+  nodes: {
+    enabled: false,
+    approvedDevices: [],
+    port: 4632,
+    pairingTimeout: 300,
+  },
+  memory: { ...DEFAULT_MEMORY_SETTINGS },
 };
 
 export interface HeartbeatExcludeWindow {
@@ -184,8 +206,23 @@ export interface Settings {
   providers: ProvidersConfig;
   mcp: MCPConfig;
   subagents: SubagentConfig;
+  acp: ACPConfig;
   maxConcurrent: number;
   streaming: StreamingConfig;
+  browser: BrowserConfig;
+  nodes: NodesConfig;
+  memory: MemorySettings;
+}
+
+export interface NodesConfig {
+  /** 是否啟用 Node Pairing 功能 */
+  enabled: boolean;
+  /** 已核准的裝置 ID 清單 */
+  approvedDevices: string[];
+  /** WebSocket port（與 web server 共用，預設 4632） */
+  port: number;
+  /** 配對碼有效期（秒），預設 300 */
+  pairingTimeout: number;
 }
 
 export type { TokenPoolEntry, TokenStrategy, TokenPoolConfig };
@@ -473,6 +510,13 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
       defaultModel: typeof raw.subagents?.defaultModel === "string" ? raw.subagents.defaultModel : "sonnet",
       timeoutMs: typeof raw.subagents?.timeoutMs === "number" ? raw.subagents.timeoutMs : 600000,
     },
+    acp: {
+      enabled: raw.acp?.enabled !== false,
+      agents: { ...DEFAULT_SETTINGS.acp.agents, ...raw.acp?.agents },
+      defaultAgent: typeof raw.acp?.defaultAgent === "string" ? raw.acp.defaultAgent : "claude",
+      maxConcurrent: typeof raw.acp?.maxConcurrent === "number" ? raw.acp.maxConcurrent : 3,
+      timeoutMs: typeof raw.acp?.timeoutMs === "number" ? raw.acp.timeoutMs : 600000,
+    },
     maxConcurrent: typeof raw.maxConcurrent === "number" && raw.maxConcurrent >= 1 ? raw.maxConcurrent : 3,
     streaming: {
       enabled: raw.streaming?.enabled === true,
@@ -481,6 +525,30 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
       minChunkChars: typeof raw.streaming?.minChunkChars === "number" && raw.streaming.minChunkChars >= 0
         ? raw.streaming.minChunkChars : 50,
     },
+    browser: parseBrowserConfig(raw.browser as Record<string, any> | undefined),
+    memory: parseMemorySettings(raw.memory),
+    nodes: {
+      enabled: raw.nodes?.enabled === true,
+      approvedDevices: Array.isArray(raw.nodes?.approvedDevices)
+        ? raw.nodes.approvedDevices.map(String)
+        : [],
+      port: typeof raw.nodes?.port === "number" ? raw.nodes.port : 4632,
+      pairingTimeout: typeof raw.nodes?.pairingTimeout === "number" ? raw.nodes.pairingTimeout : 300,
+    },
+  };
+}
+
+function parseMemorySettings(raw: unknown): MemorySettings {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_MEMORY_SETTINGS };
+  const r = raw as Record<string, any>;
+  return {
+    enabled: r.enabled !== false,
+    dirs: Array.isArray(r.dirs) ? r.dirs.map(String) : DEFAULT_MEMORY_SETTINGS.dirs,
+    embeddingProvider: r.embeddingProvider === "tfidf" ? "tfidf" : "ollama",
+    embeddingModel: typeof r.embeddingModel === "string" ? r.embeddingModel : DEFAULT_MEMORY_SETTINGS.embeddingModel,
+    ollamaUrl: typeof r.ollamaUrl === "string" ? r.ollamaUrl : DEFAULT_MEMORY_SETTINGS.ollamaUrl,
+    autoIndex: r.autoIndex !== false,
+    indexIntervalMs: typeof r.indexIntervalMs === "number" ? r.indexIntervalMs : DEFAULT_MEMORY_SETTINGS.indexIntervalMs,
   };
 }
 
