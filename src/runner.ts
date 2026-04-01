@@ -19,6 +19,7 @@ import { homedir } from "os";
 import { ProgressReporter, type ProgressCallback } from "./progress-reporter";
 import { recordMetrics } from "./metrics";
 import { StreamHandler } from "./stream-handler";
+import { BrowserManager } from "./browser";
 
 const LOGS_DIR = join(process.cwd(), ".claude/claudeclaw/logs");
 // Resolve prompts relative to the claudeclaw installation, not the project dir
@@ -826,6 +827,67 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
   }
 
   return result;
+}
+
+/**
+ * 處理 AI 輸出中的 [browser:...] 語法。
+ * 支援 [browser:screenshot url]、[browser:navigate url]、[browser:snapshot]、[browser:click selector]。
+ * 回傳處理後的文字（將 [browser:...] 替換為執行結果摘要）。
+ */
+export async function processBrowserActions(text: string): Promise<{ text: string; screenshots: Buffer[] }> {
+  const BROWSER_RE = /\[browser:(screenshot|navigate|snapshot|click|type|evaluate)\s+([^\]]+)\]/g;
+  const screenshots: Buffer[] = [];
+  let output = text;
+
+  const matches = [...text.matchAll(BROWSER_RE)];
+  if (matches.length === 0) return { text, screenshots };
+
+  const settings = getSettings();
+  if (!settings.browser.enabled) return { text, screenshots };
+
+  const mgr = BrowserManager.getInstance(settings.browser);
+
+  for (const match of matches) {
+    const [full, action, arg] = match;
+    let replacement = "";
+    try {
+      switch (action) {
+        case "screenshot":
+          await mgr.navigate(arg.trim());
+          screenshots.push(await mgr.screenshot());
+          replacement = `[📸 screenshot: ${arg.trim()}]`;
+          break;
+        case "navigate":
+          await mgr.navigate(arg.trim());
+          replacement = `[🌐 navigated: ${arg.trim()}]`;
+          break;
+        case "snapshot": {
+          const snap = await mgr.snapshot();
+          replacement = `[accessibility snapshot]\n${snap}`;
+          break;
+        }
+        case "click":
+          await mgr.click(arg.trim());
+          replacement = `[clicked: ${arg.trim()}]`;
+          break;
+        case "type": {
+          const [sel, ...rest] = arg.trim().split(/\s+/);
+          await mgr.type(sel, rest.join(" "));
+          replacement = `[typed into: ${sel}]`;
+          break;
+        }
+        case "evaluate":
+          const result = await mgr.evaluate(arg.trim());
+          replacement = `[eval result: ${JSON.stringify(result)}]`;
+          break;
+      }
+    } catch (err: any) {
+      replacement = `[browser error: ${err.message}]`;
+    }
+    output = output.replace(full, replacement);
+  }
+
+  return { text: output, screenshots };
 }
 
 export async function run(name: string, prompt: string, threadId?: string): Promise<RunResult> {

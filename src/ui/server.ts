@@ -9,13 +9,21 @@ import { readLogs } from "./services/logs";
 import { getMetricsSummary } from "../metrics";
 import { getQueueManager } from "../queue-manager";
 import { peekSession } from "../sessions";
+import { getNodeHost, type NodeWsData } from "../node-host";
 
 export function startWebUi(opts: StartWebUiOptions): WebServerHandle {
-  const server = Bun.serve({
+  const server = Bun.serve<NodeWsData>({
     hostname: opts.host,
     port: opts.port,
-    fetch: async (req) => {
+    fetch: async (req, srv) => {
       const url = new URL(req.url);
+
+      // WebSocket upgrade for /ws/node
+      if (url.pathname === "/ws/node") {
+        const ok = srv.upgrade(req, { data: { deviceId: null } });
+        if (ok) return undefined as unknown as Response;
+        return new Response("WebSocket upgrade failed", { status: 400 });
+      }
 
       if (url.pathname === "/" || url.pathname === "/index.html") {
         return new Response(htmlPage(), {
@@ -211,6 +219,26 @@ export function startWebUi(opts: StartWebUiOptions): WebServerHandle {
       }
 
       return new Response("Not found", { status: 404 });
+    },
+
+    // WebSocket handler for /ws/node
+    websocket: {
+      open(ws: import("bun").ServerWebSocket<NodeWsData>) {
+        ws.data = ws.data ?? { deviceId: null };
+        console.log("[NodeHost] WebSocket 連線建立");
+      },
+      message(ws: import("bun").ServerWebSocket<NodeWsData>, message: string | Buffer) {
+        const nodeHost = getNodeHost();
+        const raw = typeof message === "string" ? message : message.toString();
+        const resp = nodeHost.handleMessage(ws, raw);
+        if (resp) ws.send(JSON.stringify(resp));
+      },
+      close(ws: import("bun").ServerWebSocket<NodeWsData>) {
+        const nodeHost = getNodeHost();
+        if (ws.data?.deviceId) {
+          nodeHost.removeConnection(ws.data.deviceId);
+        }
+      },
     },
   });
 

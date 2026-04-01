@@ -58,6 +58,7 @@ interface DiscordInteraction {
   data?: {
     name?: string;
     custom_id?: string;
+    options?: Array<{ name: string; value: any }>;
   };
   channel_id?: string;
   guild_id?: string;
@@ -1137,7 +1138,7 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
           const buf = await mgr.screenshot();
           // 上傳截圖作為 follow-up
           const form = new FormData();
-          form.append("files[0]", new Blob([buf], { type: "image/png" }), "screenshot.png");
+          form.append("files[0]", new Blob([new Uint8Array(buf)], { type: "image/png" }), "screenshot.png");
           form.append("payload_json", JSON.stringify({ content: `📸 ${url}` }));
           await fetch(
             `https://discord.com/api/v10/webhooks/${applicationId}/${interaction.token}/messages/@original`,
@@ -1205,9 +1206,9 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
     if (interaction.data.name === "node") {
       const { getNodeHost } = await import("../node-host");
       const nodeHost = getNodeHost();
-      const deviceArg = String(interaction.data.options?.find((o: any) => o.name === "device")?.value ?? "");
-      const action = String(interaction.data.options?.find((o: any) => o.name === "action")?.value ?? "");
-      const args = interaction.data.options?.find((o: any) => o.name === "args")?.value;
+      const deviceArg = String((interaction.data as any).options?.find((o: any) => o.name === "device")?.value ?? "");
+      const action = String((interaction.data as any).options?.find((o: any) => o.name === "action")?.value ?? "");
+      const args = (interaction.data as any).options?.find((o: any) => o.name === "args")?.value;
 
       const devices = nodeHost.listDevices();
       const device = devices.find(d => d.id.startsWith(deviceArg) || d.name === deviceArg);
@@ -1223,10 +1224,10 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
       await respondToInteraction(interaction, { content: `⏳ 正在對 **${device.name}** 執行 ${action}...` });
       try {
         if (action === "screenshot") {
-          const b64 = await nodeHost.screenshot(device.id);
-          const buf = Buffer.from(b64, "base64");
+          const buf = await b64;
+          const bytes = Buffer.from(buf, "base64");
           const form = new FormData();
-          form.append("files[0]", new Blob([buf], { type: "image/png" }), "screenshot.png");
+          form.append("files[0]", new Blob([bytes.buffer as ArrayBuffer], { type: "image/png" }), "screenshot.png");
           form.append("payload_json", JSON.stringify({ content: `📸 **${device.name}** 截圖` }));
           await fetch(
             `https://discord.com/api/v10/webhooks/${applicationId}/${interaction.token}/messages/@original`,
