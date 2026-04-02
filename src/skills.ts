@@ -1,7 +1,15 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+
+async function isDirOrSymlinkToDir(dir: string, entry: any): Promise<boolean> {
+  if (entry.isDirectory()) return true;
+  if (entry.isSymbolicLink?.()) {
+    try { return (await stat(join(dir, entry.name))).isDirectory(); } catch { return false; }
+  }
+  return false;
+}
 
 export interface SkillMetadata {
   name: string;
@@ -221,7 +229,7 @@ async function collectSkillsMetaFromDir(
   try {
     const entries = await readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
+      if (!(await isDirOrSymlinkToDir(dir, entry))) continue;
       const skillPath = join(dir, entry.name, "SKILL.md");
       if (!existsSync(skillPath)) continue;
 
@@ -310,7 +318,7 @@ async function searchPluginSkills(
   try {
     const entries = await readdir(pluginsDir, { withFileTypes: true });
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
+      if (!(await isDirOrSymlinkToDir(dir, entry))) continue;
       if (pluginHint && entry.name !== pluginHint) continue;
 
       const skillPath = join(pluginsDir, entry.name, "skills", skillName, "SKILL.md");

@@ -485,7 +485,7 @@ async function registerSlashCommands(token: string): Promise<void> {
         type: 1,
       } as any);
     }
-    debugLog(`Added ${skills.length} skill commands (total: ${commands.length})`);
+    console.log(`[Discord] Added ${skills.length} skill commands (total: ${commands.length})`);
   } catch (e) {
     console.error(`[Discord] Failed to load skills for slash commands: ${e}`);
   }
@@ -499,7 +499,7 @@ async function registerSlashCommands(token: string): Promise<void> {
     `/applications/${applicationId}/commands`,
     finalCommands,
   );
-  debugLog(`Slash commands registered: ${finalCommands.length}`);
+  console.log(`[Discord] Slash commands registered: ${finalCommands.length}`);
 }
 
 // --- Interaction response helper ---
