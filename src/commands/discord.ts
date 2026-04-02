@@ -470,13 +470,36 @@ async function registerSlashCommands(token: string): Promise<void> {
     },
   ];
 
+  // Dynamically add skills as slash commands
+  try {
+    const { listSkillsWithMetadata } = await import("../skills");
+    const skills = await listSkillsWithMetadata();
+    const existingNames = new Set(commands.map((c: any) => c.name));
+    for (const skill of skills) {
+      const cmdName = skill.name.toLowerCase().replace(/[^a-z0-9-_]/g, "-").slice(0, 32);
+      if (existingNames.has(cmdName)) continue;
+      existingNames.add(cmdName);
+      commands.push({
+        name: cmdName,
+        description: (skill.description || `Skill: ${skill.name}`).slice(0, 100),
+        type: 1,
+      } as any);
+    }
+    debugLog(`Added ${skills.length} skill commands (total: ${commands.length})`);
+  } catch (e) {
+    console.error(`[Discord] Failed to load skills for slash commands: ${e}`);
+  }
+
+  // Discord limit: max 100 global commands
+  const finalCommands = commands.slice(0, 100);
+
   await discordApi(
     token,
     "PUT",
     `/applications/${applicationId}/commands`,
-    commands,
+    finalCommands,
   );
-  debugLog("Slash commands registered");
+  debugLog(`Slash commands registered: ${finalCommands.length}`);
 }
 
 // --- Interaction response helper ---
@@ -1266,6 +1289,35 @@ async function handleInteractionCreate(token: string, interaction: DiscordIntera
         );
       }
       return;
+    }
+
+    // Skill commands: try resolving as skill
+    try {
+      const { resolveSkillPrompt } = await import("../skills");
+      const skillContent = await resolveSkillPrompt(interaction.data.name);
+      if (skillContent) {
+        await respondToInteraction(interaction, {
+          content: `🔧 Running skill **/${interaction.data.name}**...`,
+        });
+        // Route to the same message handling as regular messages
+        const channelId = interaction.channel_id;
+        if (channelId) {
+          const syntheticMessage = {
+            id: interaction.id,
+            channel_id: channelId,
+            guild_id: interaction.guild_id,
+            author: interaction.member?.user ?? { id: "unknown", username: "unknown", discriminator: "0", avatar: null },
+            content: `/${interaction.data.name}`,
+            attachments: [] as any[],
+            timestamp: new Date().toISOString(),
+          };
+          // Emit as a regular message to be handled by the message handler
+          handleMessageCreate(config.token, syntheticMessage as any);
+        }
+        return;
+      }
+    } catch {
+      // skill resolution failed, fall through
     }
 
     // Unknown command
