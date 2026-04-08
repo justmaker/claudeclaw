@@ -1,0 +1,40 @@
+name: Sync upstream
+on:
+  schedule:
+    - cron: '0 * * * *'  # every hour
+  workflow_dispatch:       # manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync upstream
+        run: |
+          git config user.name "justmaker"
+          git config user.email "justmaker@users.noreply.github.com"
+          git remote add upstream https://github.com/moazbuilds/claudeclaw.git
+          git fetch upstream
+
+          # Check if there are new commits
+          BEHIND=$(git rev-list HEAD..upstream/master --count)
+          if [ "$BEHIND" = "0" ]; then
+            echo "Already up to date with upstream."
+            exit 0
+          fi
+
+          echo "Upstream has $BEHIND new commit(s). Attempting merge..."
+
+          # Try merge, abort on conflict
+          if git merge upstream/master --no-edit; then
+            echo "Merge successful."
+            git push origin master
+          else
+            echo "::warning::Merge conflict detected with upstream. Skipping auto-sync — manual cherry-pick recommended."
+            git merge --abort
+            exit 0
+          fi
