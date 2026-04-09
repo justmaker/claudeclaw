@@ -6,8 +6,9 @@ function delay(ms: number): Promise<void> {
 }
 
 describe("QueueManager", () => {
+  // reservedSlots=0 for basic tests (no priority logic)
   it("respects maxConcurrent limit", async () => {
-    const qm = new QueueManager(2);
+    const qm = new QueueManager(2, 0);
     let peak = 0;
     let current = 0;
 
@@ -30,7 +31,7 @@ describe("QueueManager", () => {
   });
 
   it("processes same-thread tasks in order", async () => {
-    const qm = new QueueManager(3);
+    const qm = new QueueManager(3, 0);
     const order: number[] = [];
 
     const makeTask = (n: number) => async () => {
@@ -49,7 +50,7 @@ describe("QueueManager", () => {
   });
 
   it("allows different threads to run concurrently", async () => {
-    const qm = new QueueManager(3);
+    const qm = new QueueManager(3, 0);
     const startTimes: Record<string, number> = {};
     const start = Date.now();
 
@@ -71,7 +72,7 @@ describe("QueueManager", () => {
   });
 
   it("propagates errors without blocking queue", async () => {
-    const qm = new QueueManager(2);
+    const qm = new QueueManager(2, 0);
 
     const failTask = async () => {
       throw new Error("boom");
@@ -93,7 +94,7 @@ describe("QueueManager", () => {
   });
 
   it("tracks running and queued counts", async () => {
-    const qm = new QueueManager(1);
+    const qm = new QueueManager(1, 0);
     let resolveFirst!: () => void;
     const blocker = new Promise<void>((r) => { resolveFirst = r; });
 
@@ -114,7 +115,7 @@ describe("QueueManager", () => {
   });
 
   it("setMaxConcurrent drains waiting tasks", async () => {
-    const qm = new QueueManager(1);
+    const qm = new QueueManager(1, 0);
     let running = 0;
     let peak = 0;
 
@@ -137,5 +138,34 @@ describe("QueueManager", () => {
     await Promise.all([p1, p2, p3]);
     // After bumping, peak should be > 1
     expect(peak).toBeGreaterThan(1);
+  });
+
+  it("priority tasks bypass reserved slots", async () => {
+    // maxConcurrent=3, reservedSlots=2: non-priority can only use 1 slot
+    const qm = new QueueManager(3, 2);
+    let resolvers: (() => void)[] = [];
+    const makeBlocker = () => new Promise<void>((r) => { resolvers.push(r); });
+
+    // Fill 1 non-priority slot (max for non-priority = 3-2 = 1)
+    const p1 = qm.enqueue("a", () => makeBlocker());
+    await delay(5);
+    expect(qm.runningCount).toBe(1);
+
+    // Second non-priority should be queued (slot full for non-priority)
+    const p2 = qm.enqueue("b", async () => "b-done");
+    await delay(5);
+    expect(qm.runningCount).toBe(1);
+    expect(qm.queuedCount).toBe(1);
+
+    // Priority task should run immediately (uses reserved slots)
+    let priorityStarted = false;
+    const p3 = qm.enqueue("c", async () => { priorityStarted = true; await delay(50); return "c-done"; }, true);
+    await delay(10);
+    expect(priorityStarted).toBe(true);
+    expect(qm.runningCount).toBe(2);
+
+    // Cleanup
+    resolvers.forEach((r) => r());
+    await Promise.all([p1, p2, p3]);
   });
 });
