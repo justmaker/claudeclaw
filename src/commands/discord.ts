@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { transcribeAudioToText } from "../whisper";
 import { synthesize, sendDiscordVoice, shouldSynthesizeVoice, parseVoiceCommand } from "../tts";
 import { resolveSkillPrompt, listSkillsWithMetadata, formatSkillsList } from "../skills";
-import { listSubagents, killSubagent } from "../subagent";
+import { listSubagents, killSubagent, spawnSubagent } from "../subagent";
 import { listAgents, spawnAgent, listSessions as listACPSessions, killSession as killACPSession } from "../acp";
 import { getMetricsSummary } from "../metrics";
 import { mkdir } from "node:fs/promises";
@@ -265,7 +265,7 @@ function guildTriggerReason(message: DiscordMessage): string | null {
   if (botUserId && message.referenced_message?.author?.id === botUserId) return "reply_to_bot";
 
   // Mention via mentions array
-  if (botUserId && message.mentions.some((m) => m.id === botUserId)) return "mention";
+  if (botUserId && message.mentions?.some((m) => m.id === botUserId)) return "mention";
 
   // Mention in content (fallback)
   if (botUserId && message.content.includes(`<@${botUserId}>`)) return "mention_in_content";
@@ -284,7 +284,7 @@ function guildTriggerReason(message: DiscordMessage): string | null {
 // --- Attachment handling ---
 
 // --- Thread intent classifier (regex-first, AI fallback) ---
-import { classifyIntent, type ThreadIntent } from "../intent-classifier.js";
+import { detectHire, classifyHireFast, classifyHireByAI, type ThreadIntent, type HireTask } from "../intent-classifier.js";
 
 // --- Attachment handling (original) ---
 
@@ -631,37 +631,78 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
       }
     }
 
-    // --- Thread management: AI-powered intent classification ---
-    if (isGuild && cleanContent.length < 200) {
-      const intent = await classifyIntent(cleanContent);
-      if (intent && intent.action === "hire" && intent.names.length > 0) {
+    // --- Thread management: hire (AI-parsed) + fire (regex) ---
+    if (isGuild && cleanContent.length < 500) {
+      // --- Hire: detect keyword, then let AI parse the full intent ---
+      const hireRaw = detectHire(cleanContent);
+      if (hireRaw) {
+        console.log(`[Discord] Hire detected, raw text: "${hireRaw}"`);
+        // Try fast regex path first, fall back to AI for complex inputs
+        let tasks = classifyHireFast(hireRaw);
+        if (tasks) {
+          console.log(`[Discord] Hire fast path: ${tasks.length} task(s)`);
+        } else {
+          await sendMessage(config.token, channelId, `🤔 理解中...`);
+          tasks = await classifyHireByAI(hireRaw);
+        }
+        if (tasks.length === 0) {
+          await sendMessage(config.token, channelId, `❌ 無法理解 hire 指令，請重試。`);
+          return;
+        }
+        const EMOJIS = ["🔧", "🛠️", "⚙️", "💻", "🔬", "🧪", "📊", "📡", "🔭", "🎯", "🧩", "📐", "🗂️", "📋", "🔗", "🧮", "📦", "🔌", "🖨️", "🚀"];
         const results: string[] = [];
-        for (const threadName of intent.names) {
+        for (const task of tasks) {
           try {
+            const emoji = EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
+            const threadDisplayName = `${emoji} ${task.threadName}`;
             const thread = await discordApi<{ id: string; name: string }>(
               config.token,
               "POST",
               `/channels/${channelId}/threads`,
               {
-                name: threadName,
+                name: threadDisplayName.slice(0, 100),
                 type: 11, // PUBLIC_THREAD
-                auto_archive_duration: 4320, // 3 days
+                auto_archive_duration: 10080, // 1 week
               },
             );
             knownThreads.set(thread.id, { parentId: channelId });
-            // Don't pre-create session — let Claude CLI create it on first message
-            // The real UUID will be captured and saved by runner.ts
-            await sendMessage(config.token, thread.id, `🧵 Thread **${threadName}** created with independent session. Start chatting!`);
-            results.push(`✅ **${threadName}** → <#${thread.id}>`);
-            console.log(`[Discord] Thread created: ${thread.id} name="${threadName}" parent=${channelId} knownSize=${knownThreads.size}`);
+            console.log(`[Discord] Hire thread created: ${thread.id} name="${threadDisplayName}" parent=${channelId}`);
+
+            // Spawn subagent with the task
+            const subagent = await spawnSubagent({
+              task: task.task,
+              label: task.threadName,
+              threadId: thread.id,
+              onComplete: async (result) => {
+                try {
+                  const output = result.stdout?.trim() || "(no output)";
+                  // Send result to the thread (split if > 2000 chars)
+                  const MAX_LEN = 1950;
+                  for (let i = 0; i < output.length; i += MAX_LEN) {
+                    await sendMessage(config.token, thread.id, output.slice(i, i + MAX_LEN));
+                  }
+                  // Notify main channel
+                  await sendMessage(config.token, channelId,
+                    `✅ **${threadDisplayName}** 完成 — 結果在 <#${thread.id}>`);
+                } catch (err) {
+                  console.error(`[Discord] Failed to post subagent result: ${err}`);
+                }
+              },
+            });
+            await sendMessage(config.token, thread.id,
+              `🚀 Subagent 已啟動（${subagent.id}）\n📋 任務：${task.task}`);
+            results.push(`✅ **${threadDisplayName}** → <#${thread.id}>（subagent: ${subagent.id}）`);
           } catch (err) {
-            results.push(`❌ **${threadName}** — ${err instanceof Error ? err.message : err}`);
+            results.push(`❌ **${task.threadName}** — ${err instanceof Error ? err.message : err}`);
           }
         }
         await sendMessage(config.token, channelId, results.join("\n"));
         return;
       }
 
+      // --- Fire: regex-only (no AI fallback to avoid 5s timeout on every message) ---
+      const { classifyByRegex } = await import("../intent-classifier.js");
+      const intent = classifyByRegex(cleanContent);
       if (intent && intent.action === "fire" && intent.names.length > 0) {
         const results: string[] = [];
         for (const targetName of intent.names) {
@@ -783,7 +824,9 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
       onStreamChunk((chunk) => { streamHandler?.push(chunk); });
     }
 
-    const result = await qm.enqueue(queueId, () => runUserMessage("discord", prefixedPrompt, threadId));
+    // Main channel messages get priority (not queued behind subagent threads)
+    const isMainChannel = !threadId;
+    const result = await qm.enqueue(queueId, () => runUserMessage("discord", prefixedPrompt, threadId), isMainChannel);
 
     if (streamHandler) { await streamHandler.finish(); clearStreamCallback(); }
     clearProgressCallback();
@@ -1506,12 +1549,12 @@ export function startGateway(debug = false): void {
         size: a.size,
         flags: a.flags?.bitfield,
       })),
-      mentions: message.mentions.users.map((u) => ({
+      mentions: (message.mentions?.users?.map((u) => ({
         id: u.id,
         username: u.username,
         discriminator: u.discriminator,
         bot: u.bot,
-      })),
+      })) ?? []) as DiscordUser[],
       referenced_message: message.reference?.messageId ? {
         id: message.reference.messageId,
         channel_id: message.channelId,
@@ -1632,12 +1675,39 @@ export function startGateway(debug = false): void {
   client.on("warn", (msg) => console.warn(`[Discord] warn: ${msg}`));
   client.on("error", (err) => console.error(`[Discord] error:`, err));
 
-  (async () => {
-    await ensureProjectClaudeMd();
-    await client!.login(config.token);
-  })().catch((err) => {
-    console.error(`[Discord] Fatal: ${err}`);
-  });
+  let startupAttempts = 0;
+  const maxStartupAttempts = 6;
+  const startupRetryDelayMs = 15_000;
+
+  const tryLogin = async (): Promise<void> => {
+    startupAttempts += 1;
+    try {
+      await ensureProjectClaudeMd();
+      await client!.login(config.token);
+    } catch (err) {
+      console.error(`[Discord] Fatal: ${err}`);
+
+      if (!running) return;
+
+      if (startupAttempts < maxStartupAttempts) {
+        console.error(
+          `[Discord] Startup login failed (${startupAttempts}/${maxStartupAttempts}); retrying in ${Math.round(startupRetryDelayMs / 1000)}s`,
+        );
+        setTimeout(() => {
+          if (!running) return;
+          tryLogin().catch((retryErr) => {
+            console.error(`[Discord] Retry orchestration failed: ${retryErr}`);
+          });
+        }, startupRetryDelayMs).unref();
+        return;
+      }
+
+      console.error(`[Discord] Startup failed after ${maxStartupAttempts} attempts; exiting so service manager can restart`);
+      process.exit(1);
+    }
+  };
+
+  void tryLogin();
 }
 
 /** Standalone entry point (bun run src/index.ts discord) */
