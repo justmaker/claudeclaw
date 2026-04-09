@@ -100,7 +100,7 @@ const DEFAULT_SETTINGS: Settings = {
     maxConcurrent: 3,
     timeoutMs: 600000,
   },
-  maxConcurrent: 3,
+  maxConcurrent: 10,
   streaming: {
     enabled: false,
     updateIntervalMs: 2000,
@@ -212,6 +212,7 @@ export interface Settings {
   browser: BrowserConfig;
   nodes: NodesConfig;
   memory: MemorySettings;
+  sessionTimeoutMs: number;
 }
 
 export interface NodesConfig {
@@ -517,7 +518,7 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
       maxConcurrent: typeof raw.acp?.maxConcurrent === "number" ? raw.acp.maxConcurrent : 3,
       timeoutMs: typeof raw.acp?.timeoutMs === "number" ? raw.acp.timeoutMs : 600000,
     },
-    maxConcurrent: typeof raw.maxConcurrent === "number" && raw.maxConcurrent >= 1 ? raw.maxConcurrent : 3,
+    maxConcurrent: typeof raw.maxConcurrent === "number" && raw.maxConcurrent >= 1 ? raw.maxConcurrent : 10,
     streaming: {
       enabled: raw.streaming?.enabled === true,
       updateIntervalMs: typeof raw.streaming?.updateIntervalMs === "number" && raw.streaming.updateIntervalMs >= 500
@@ -535,6 +536,8 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
       port: typeof raw.nodes?.port === "number" ? raw.nodes.port : 4632,
       pairingTimeout: typeof raw.nodes?.pairingTimeout === "number" ? raw.nodes.pairingTimeout : 300,
     },
+    sessionTimeoutMs: typeof raw.sessionTimeoutMs === "number" && raw.sessionTimeoutMs > 0
+      ? raw.sessionTimeoutMs : 0,
   };
 }
 

@@ -458,7 +458,7 @@ export async function compactCurrentSession(): Promise<{ success: boolean; messa
   const securityArgs = buildSecurityArgs(settings.security);
   const { CLAUDECODE: _, ...cleanEnv } = process.env;
   const baseEnv = { ...cleanEnv } as Record<string, string>;
-  const timeoutMs = (settings as any).sessionTimeoutMs || CLAUDE_TIMEOUT_MS;
+  const timeoutMs = settings.sessionTimeoutMs || CLAUDE_TIMEOUT_MS;
 
   const ok = await runCompact(
     existing.sessionId,
@@ -535,7 +535,7 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
     console.log(
       `[${new Date().toLocaleTimeString()}] Routing to external provider for model: ${primaryConfig.model}`
     );
-    const timeoutMs = (settings as any).sessionTimeoutMs || CLAUDE_TIMEOUT_MS;
+    const timeoutMs = settings.sessionTimeoutMs || CLAUDE_TIMEOUT_MS;
     const result = await runWithProvider(prompt, primaryConfig.model, settings.providers, { timeoutMs });
 
     try {
@@ -561,16 +561,16 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
   }
 
   const securityArgs = buildSecurityArgs(security);
-  const timeoutMs = (settings as any).sessionTimeoutMs || CLAUDE_TIMEOUT_MS;
+  const timeoutMs = settings.sessionTimeoutMs || CLAUDE_TIMEOUT_MS;
 
   console.log(
     `[${new Date().toLocaleTimeString()}] Running: ${name} (${isNew ? "new session" : `resume ${existing.sessionId.slice(0, 8)}`}, security: ${security.level})`
   );
 
-  // Streaming: use stream-json for resumed sessions when enabled
+  // Streaming: use stream-json when enabled (works for both new and resumed sessions)
   const streamingEnabled = settings.streaming?.enabled === true;
-  const useStreaming = streamingEnabled && !isNew && globalStreamCallback;
-  const outputFormat = isNew ? "json" : (useStreaming ? "stream-json" : "text");
+  const useStreaming = streamingEnabled && globalStreamCallback;
+  const outputFormat = useStreaming ? "stream-json" : (isNew ? "json" : "text");
   const args = ["claude", "-p", prompt, "--output-format", outputFormat, ...securityArgs];
 
   if (!isNew) {
@@ -688,12 +688,41 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
     stdout = rateLimitMessage;
   }
 
-  // For new sessions, parse the JSON to extract session_id and result text
+  // For new sessions, parse output to extract session_id and result text
   if (!rateLimitMessage && isNew && exitCode === 0) {
     try {
-      const json = JSON.parse(rawStdout);
-      sessionId = json.session_id;
-      stdout = json.result ?? "";
+      if (useStreaming) {
+        // stream-json mode: parse NDJSON lines to find session_id and result
+        const textParts: string[] = [];
+        for (const line of rawStdout.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const evt = JSON.parse(trimmed);
+            // Extract session_id from init or system events
+            if (evt.session_id) sessionId = evt.session_id;
+            if (evt.type === "content_block_delta" && evt.delta?.text) {
+              textParts.push(evt.delta.text);
+            }
+            if (evt.type === "assistant" && typeof evt.content === "string") {
+              textParts.push(evt.content);
+            }
+            if (evt.type === "result") {
+              if (evt.session_id) sessionId = evt.session_id;
+              if (typeof evt.result === "string") {
+                textParts.length = 0;
+                textParts.push(evt.result);
+              }
+            }
+          } catch {}
+        }
+        if (textParts.length > 0) stdout = textParts.join("");
+      } else {
+        // json mode: single JSON object
+        const json = JSON.parse(rawStdout);
+        sessionId = json.session_id;
+        stdout = json.result ?? "";
+      }
       // Save the real session ID from Claude Code
       if (threadId) {
         await createThreadSession(threadId, sessionId);
