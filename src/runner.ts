@@ -572,6 +572,7 @@ async function execClaude(name: string, prompt: string, threadId?: string): Prom
   const useStreaming = streamingEnabled && globalStreamCallback;
   const outputFormat = useStreaming ? "stream-json" : (isNew ? "json" : "text");
   const args = ["claude", "-p", prompt, "--output-format", outputFormat, ...securityArgs];
+  if (useStreaming) args.push("--verbose");
 
   if (!isNew) {
     args.push("--resume", existing.sessionId);
