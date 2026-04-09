@@ -71,7 +71,7 @@ const DEFAULT_SETTINGS: Settings = {
     forwardToTelegram: true,
   },
   telegram: { token: "", allowedUserIds: [] },
-  discord: { token: "", allowedUserIds: [], listenChannels: [] },
+  discord: { token: "", allowedUserIds: [], listenChannels: [], listenGuilds: [] },
   signal: { enabled: false, phone: "", apiUrl: "http://localhost:8080", allowedNumbers: [] },
   slack: { enabled: false, botToken: "", appToken: "", signingSecret: "", allowedUsers: [], listenChannels: [] },
   whatsapp: { enabled: false, allowedNumbers: [], sessionPath: "~/.claude/claudeclaw/whatsapp-session" },
@@ -138,6 +138,7 @@ export interface DiscordConfig {
   token: string;
   allowedUserIds: string[]; // Discord snowflake IDs exceed Number.MAX_SAFE_INTEGER
   listenChannels: string[]; // Channel IDs where bot responds to all messages (no mention needed)
+  listenGuilds: string[]; // Guild IDs where bot responds to all messages in any channel/thread
 }
 
 export interface SlackConfig {
@@ -456,6 +457,9 @@ function parseSettings(raw: Record<string, any>, discordUserIdOverrides?: string
             : [],
       listenChannels: Array.isArray(raw.discord?.listenChannels)
         ? raw.discord.listenChannels.map(String)
+        : [],
+      listenGuilds: Array.isArray(raw.discord?.listenGuilds)
+        ? raw.discord.listenGuilds.map(String)
         : [],
     },
     signal: {
