@@ -181,7 +181,7 @@ async function runClaudeOnce(
 
   // Set up progress reporter if callback is registered
   const progressReporter = progressCallback
-    ? new ProgressReporter({ intervalMs: 60_000, onProgress: progressCallback })
+    ? new ProgressReporter({ intervalMs: 30_000, onProgress: progressCallback })
     : null;
   progressReporter?.start();
 

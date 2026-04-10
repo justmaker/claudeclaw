@@ -802,8 +802,17 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
     const qm = getQueueManager(getSettings().maxConcurrent);
 
     // Set up progress callback for long-running tasks
-    onProgress((update) => {
-      sendMessage(config.token, channelId, update.message).catch(() => {});
+    let progressMsgId: string | null = null;
+    onProgress(async (update) => {
+      try {
+        if (progressMsgId) {
+          // Edit existing progress message
+          await editMessage(config.token, channelId, progressMsgId, update.message);
+        } else {
+          // Create new progress message (will be edited on subsequent updates)
+          progressMsgId = await sendMessageGetId(config.token, channelId, update.message);
+        }
+      } catch {}
     });
 
     // Streaming mode setup
@@ -833,6 +842,12 @@ async function handleMessageCreate(token: string, message: DiscordMessage): Prom
 
     if (streamHandler) { await streamHandler.finish(); clearStreamCallback(); }
     clearProgressCallback();
+
+    // Clean up progress message once task is done
+    if (progressMsgId) {
+      await discordApi(config.token, "DELETE", `/channels/${channelId}/messages/${progressMsgId}`).catch(() => {});
+      progressMsgId = null;
+    }
 
     if (result.exitCode !== 0) {
       const errText = `Error (exit ${result.exitCode}): ${result.stderr || result.stdout || "Unknown error"}`;
