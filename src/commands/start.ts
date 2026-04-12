@@ -402,7 +402,10 @@ export async function start(args: string[] = []) {
   let discordToken = "";
 
   async function initDiscord(token: string) {
-    if (token && token !== discordToken) {
+    const shouldBeEnabled = Boolean(token);
+    const tokenChanged = token !== discordToken;
+
+    if (shouldBeEnabled && (!discordToken || tokenChanged)) {
       const { startGateway, sendMessageToUser, stopGateway } = await import("./discord");
       if (discordToken) stopGateway();
       startGateway(debugFlag);
@@ -410,7 +413,17 @@ export async function start(args: string[] = []) {
       discordSendToUser = (userId, text) => sendMessageToUser(token, userId, text);
       discordToken = token;
       console.log(`[${ts()}] Discord: enabled`);
-    } else if (!token && discordToken) {
+    } else if (shouldBeEnabled && discordToken && !tokenChanged) {
+      if (!discordStopGateway) {
+        const { startGateway, sendMessageToUser, stopGateway } = await import("./discord");
+        startGateway(debugFlag);
+        discordStopGateway = stopGateway;
+        discordSendToUser = (userId, text) => sendMessageToUser(token, userId, text);
+        console.log(`[${ts()}] Discord: enabled`);
+      } else {
+        console.log(`[${ts()}] Discord: already enabled`);
+      }
+    } else if (!shouldBeEnabled && discordToken) {
       if (discordStopGateway) discordStopGateway();
       discordStopGateway = null;
       discordSendToUser = null;

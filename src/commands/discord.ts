@@ -323,7 +323,7 @@ async function downloadDiscordAttachment(
 
 // --- Slash command registration ---
 
-async function registerSlashCommands(token: string): Promise<void> {
+async function registerSlashCommands(token: string, singleGuildId?: string): Promise<void> {
   if (!applicationId) return;
 
   const commands = [
@@ -493,16 +493,40 @@ async function registerSlashCommands(token: string): Promise<void> {
     console.error(`[Discord] Failed to load skills for slash commands: ${e}`);
   }
 
-  // Discord limit: max 100 global commands
+  // Discord limit: max 100 commands per guild
   const finalCommands = commands.slice(0, 100);
 
-  await discordApi(
-    token,
-    "PUT",
-    `/applications/${applicationId}/commands`,
-    finalCommands,
-  );
-  console.log(`[Discord] Slash commands registered: ${finalCommands.length}`);
+  // Clear stale global commands on full registration (not single-guild)
+  if (!singleGuildId) {
+    try {
+      await discordApi(token, "PUT", `/applications/${applicationId}/commands`, []);
+      console.log(`[Discord] Cleared global commands`);
+    } catch (e) {
+      console.error(`[Discord] Failed to clear global commands: ${e}`);
+    }
+  }
+
+  // Register as guild-specific commands
+  const targetGuilds = singleGuildId ? [singleGuildId] : [...(readyGuildIds ?? [])];
+
+  if (targetGuilds.length === 0) {
+    console.warn(`[Discord] No guilds available, skipping command registration`);
+    return;
+  }
+
+  for (const guildId of targetGuilds) {
+    try {
+      await discordApi(
+        token,
+        "PUT",
+        `/applications/${applicationId}/guilds/${guildId}/commands`,
+        finalCommands,
+      );
+      console.log(`[Discord] Slash commands registered for guild ${guildId}: ${finalCommands.length}`);
+    } catch (e) {
+      console.error(`[Discord] Failed to register commands for guild ${guildId}: ${e}`);
+    }
+  }
 }
 
 // --- Interaction response helper ---
@@ -1438,6 +1462,13 @@ async function handleGuildCreate(token: string, guild: DiscordGuild): Promise<vo
   if (!channelId) return;
 
   console.log(`[Discord] Joined guild: ${guild.name} (${guild.id})`);
+
+  // Register slash commands for the new guild
+  if (applicationId) {
+    registerSlashCommands(config.token, guild.id).catch((err) =>
+      console.error(`[Discord] Failed to register commands for new guild ${guild.id}: ${err}`),
+    );
+  }
 
   const eventPrompt =
     `[Discord system event] I was added to a guild.\n` +
