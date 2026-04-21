@@ -11,7 +11,7 @@
     <img src="https://img.shields.io/github/stars/moazbuilds/ClaudeClaw?style=flat-square&color=f59e0b" alt="GitHub Stars" />
   </a>
   <a href="https://github.com/moazbuilds/ClaudeClaw">
-    <img src="https://img.shields.io/badge/downloads-~10k-2da44e?style=flat-square" alt="Downloads ~10k" />
+    <img src="https://img.shields.io/badge/downloads-~10k-2da44e?style=flat-square" alt="Downloads ~15k every 14 days" />
   </a>
   <a href="https://github.com/moazbuilds/ClaudeClaw/commits/master">
     <img src="https://img.shields.io/github/last-commit/moazbuilds/ClaudeClaw?style=flat-square&color=0ea5e9" alt="Last Commit" />
